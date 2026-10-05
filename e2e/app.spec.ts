@@ -125,3 +125,40 @@ test("tracker and insights have no serious accessibility violations", async ({ p
     await page.keyboard.press("Escape");
   }
 });
+
+test("skills: personal layer, version history, SKILL.md export", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("switch", { name: "Demo data" }).click();
+  await page.getByRole("button", { name: "Skills" }).first().click();
+  const panel = page.getByRole("dialog", { name: /Skills/ });
+  await expect(panel.getByText(/baseline rule scores? with evidence/)).toBeVisible();
+  await expect(panel.getByText(/Personal v\d/).first()).toBeVisible();
+  await panel.getByRole("button", { name: /^Resume tailor/ }).click();
+  await panel.getByRole("button", { name: "Preview SKILL.md" }).click();
+  const pre = panel.getByLabel("Resume tailor SKILL.md");
+  await expect(pre).toContainText("name: resume-tailor-personal");
+  await expect(pre).toContainText("## House rules");
+  await expect(pre).toContainText("# Resume Tailor");
+  const [dl] = await Promise.all([page.waitForEvent("download"), panel.getByRole("button", { name: "Download all for Claude" }).click()]);
+  expect(dl.suggestedFilename()).toMatch(/^personal-skills-.*\.zip$/);
+  const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
+  const serious = r.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
+  expect(serious.map((v) => `skills: ${v.id} (${v.nodes.length}) ${v.nodes[0]?.target}`)).toEqual([]);
+});
+
+test("tailored resume: personalized vs baseline, keep for the application", async ({ page }) => {
+  await page.goto("/?variant=B");
+  await page.getByRole("switch", { name: "Demo data" }).click();
+  await page.getByRole("button", { name: /Try it with a sample/ }).click();
+  await page.getByRole("button", { name: "Tailor my resume for this job" }).click();
+  const card = page.getByRole("article", { name: "Tailored resume" });
+  await expect(card).toBeVisible();
+  await card.getByRole("tab", { name: "Compare with baseline skills" }).click();
+  await expect(card.getByText("Baseline skills only")).toBeVisible();
+  await expect(card.locator(".font-mono").nth(1)).toContainText("EXPERIENCE");
+  await card.getByRole("button", { name: "Keep for this application" }).click();
+  await expect(card.getByRole("button", { name: "Kept" })).toBeDisabled();
+  const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
+  const serious = r.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
+  expect(serious.map((v) => `tailor: ${v.id} (${v.nodes.length}) ${v.nodes[0]?.target}`)).toEqual([]);
+});
