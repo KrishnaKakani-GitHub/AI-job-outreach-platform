@@ -8,13 +8,11 @@ import { CHECKLIST_QUESTIONS, GAP_LABELS } from "./fit";
 import { furthestStage, isApplied, reached, roleFamily, rate, type Rate } from "./insights";
 import { hasNumber, isBullet, keywords, lines, stripBullet } from "./text";
 
-export const STRATEGY_MIN_APPS = 10;
-export const STRATEGY_MIN_OUTCOMES = 3;
-
-export function strategyStatus(apps: Application[]): { unlocked: boolean; applied: number; outcomes: number } {
+/** Counts shown on the next-steps card. There is no gate: advice is labeled by evidence tier instead. */
+export function strategyStatus(apps: Application[]): { applied: number; outcomes: number } {
   const applied = apps.filter(isApplied).length;
   const outcomes = apps.filter((a) => a.stage === "rejected" || a.stage === "offer" || reached(a, "interview")).length;
-  return { unlocked: applied >= STRATEGY_MIN_APPS && outcomes >= STRATEGY_MIN_OUTCOMES, applied, outcomes };
+  return { applied, outcomes };
 }
 
 export interface StallPoint {

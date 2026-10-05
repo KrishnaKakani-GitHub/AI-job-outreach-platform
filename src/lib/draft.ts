@@ -2,7 +2,7 @@
  * Message construction: stage rules, the Variant A template, a rules-based
  * Variant B fallback (used when no AI key is configured), and rendering.
  */
-import type { AnatomyPart, Channel, Claim, Draft, DraftSegment, FitReport, RecipientType, SharedGround, Stage } from "./schemas";
+import type { AnatomyPart, Channel, Claim, Draft, DraftSegment, FitReport, Opener, RecipientType, SharedGround, Stage } from "./schemas";
 
 export const STAGE_LABELS: Record<Stage, string> = {
   invite_note: "Invite note",
@@ -181,4 +181,18 @@ function lowerFirst(s: string): string {
 /** Resume bullets are written as verbs ("Built X"); lower-case the verb to fit "I built X". */
 function toFirstPerson(bullet: string): string {
   return lowerFirst(bullet.replace(/^[-•*]\s*/, ""));
+}
+
+/** Classify how a draft opens, so acceptance can be learned per opener. */
+export function openerOf(draft: Draft, shared: SharedGround[], variant: "A" | "B"): Opener {
+  if (variant === "A") return "template";
+  const first = draft.segments[0];
+  if (!first) return "role_led";
+  const text = first.text.toLowerCase();
+  const hit = shared.find((s) => text.includes(s.label.toLowerCase()));
+  if (!hit) return "role_led";
+  if (hit.kind === "school") return "shared_school";
+  if (hit.kind === "employer") return "shared_employer";
+  if (hit.kind === "domain") return "shared_field";
+  return "shared_other";
 }

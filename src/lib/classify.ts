@@ -162,3 +162,12 @@ export function extractRecipientMeta(text: string, hasSharedSchool: boolean): Re
   } else if (MANAGER.test(t)) recipientType = "hiring_manager";
   return { firstName, title, recipientType, reason: reason.slice(0, 160) };
 }
+
+/** Recipient type from a job title alone (used for imported connections). */
+export function recipientTypeFromTitle(title: string | null): RecipientType {
+  const t = title ?? "";
+  if (RECRUITER.test(t)) return "recruiter";
+  if (HR.test(t)) return "hr";
+  if (MANAGER.test(t)) return "hiring_manager";
+  return "team_member";
+}

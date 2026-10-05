@@ -5,8 +5,6 @@
 import type { AppStage, Application, Contact, GapTag } from "./schemas";
 import { MIN_GROUP_N, wilson, type Interval } from "./stats";
 
-export const UNLOCK_OUTREACH = 10;
-
 export interface Rate {
   key: string;
   k: number;
@@ -36,7 +34,7 @@ export function reached(app: Pick<Application, "history" | "stage">, stage: AppS
   return ORDER.indexOf(furthestStage(app)) >= ORDER.indexOf(stage);
 }
 
-export function isApplied(a: Application): boolean {
+export function isApplied(a: Pick<Application, "stage" | "history">): boolean {
   return a.stage !== "saved" || a.history.some((h) => h.stage !== "saved");
 }
 
@@ -65,7 +63,6 @@ function groupRates<T>(items: T[], keyOf: (t: T) => string, hit: (t: T) => boole
 }
 
 export interface Insights {
-  unlocked: boolean;
   outreachCount: number;
   applied: number;
   interviewConversion: Rate;
@@ -106,7 +103,6 @@ export function computeInsights(apps: Application[], contacts: Contact[]): Insig
   for (const a of applied) fam.set(roleFamily(a.role), [...(fam.get(roleFamily(a.role)) ?? []), a]);
 
   return {
-    unlocked: outreachCount >= UNLOCK_OUTREACH,
     outreachCount,
     applied: applied.length,
     interviewConversion: rate("All applications", applied.filter((a) => reached(a, "interview")).length, applied.length),
