@@ -11,7 +11,8 @@ export function parseCSV(text: string): string[][] {
   let row: string[] = [];
   let field = "";
   let quoted = false;
-  const src = text.replace(/^﻿/, "");
+  const bom = String.fromCharCode(0xfeff);
+  const src = text.startsWith(bom) ? text.slice(1) : text;
   for (let i = 0; i < src.length; i++) {
     const ch = src[i];
     if (quoted) {
