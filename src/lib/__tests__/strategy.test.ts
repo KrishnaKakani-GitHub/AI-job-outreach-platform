@@ -1,16 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { buildDemoData, DEMO_RESUME } from "../demo";
-import { computeInsights, furthestStage, roleFamily, UNLOCK_OUTREACH } from "../insights";
+import { computeInsights, furthestStage, roleFamily } from "../insights";
 import { buildStrategyFacts, finalRoundRejections, languageFixes, resumeTweaks, strategyStatus } from "../strategy";
 import type { Application } from "../schemas";
 
 const { applications, contacts } = buildDemoData(11, Date.UTC(2026, 9, 1));
 
 describe("insights", () => {
-  it("unlocks at the outreach threshold", () => {
-    const sent = contacts.filter((c) => c.stage !== "drafted").length;
-    expect(computeInsights(applications, contacts).unlocked).toBe(sent >= UNLOCK_OUTREACH);
-    expect(computeInsights(applications, []).unlocked).toBe(false);
+  it("computes insights from any amount of data (no unlock gate)", () => {
+    expect(computeInsights(applications.slice(0, 1), []).applied).toBeLessThanOrEqual(1);
+    expect(computeInsights(applications, contacts).outreachCount).toBeGreaterThan(0);
   });
   it("every rate carries an interval that contains the point estimate", () => {
     const ins = computeInsights(applications, contacts);
@@ -32,9 +31,10 @@ describe("insights", () => {
 });
 
 describe("strategy", () => {
-  it("requires enough applications and outcomes", () => {
-    expect(strategyStatus(applications.slice(0, 3)).unlocked).toBe(false);
-    expect(strategyStatus(applications).unlocked).toBe(true);
+  it("counts applied roles and outcomes", () => {
+    const s = strategyStatus(applications);
+    expect(s.applied).toBeGreaterThan(s.outcomes);
+    expect(s.outcomes).toBeGreaterThan(0);
   });
   it("ranks targets and orders apply-next by fit", () => {
     const f = buildStrategyFacts(applications, DEMO_RESUME);

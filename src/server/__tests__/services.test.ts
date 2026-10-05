@@ -10,7 +10,7 @@ vi.mock("../ai", async (orig) => {
   return { ...real, aiEnabled: () => true, callTool: (...args: unknown[]) => callTool(...args) };
 });
 
-const { analyzeFit, draftMessage, numbersAreGrounded, strategyNarrative } = await import("../services");
+const { analyzeFit, draftMessage, numbersAreGrounded, rewordRules, strategyNarrative } = await import("../services");
 
 const baseInput = {
   recipientText: RECIPIENT,
@@ -26,6 +26,7 @@ const baseInput = {
   instruction: null,
   regeneratePart: null,
   current: null,
+  guidance: null,
 };
 
 const goodDraft: Draft = {
@@ -105,5 +106,39 @@ describe("strategy narrative", () => {
   it("numbersAreGrounded accepts percentages of computed rates", () => {
     expect(numbersAreGrounded("50% of the time", { rate: 0.5 })).toBe(true);
     expect(numbersAreGrounded("12 times", { count: 3 })).toBe(false);
+  });
+});
+
+describe("playbook rewording", () => {
+  const rules = [{ key: "resume|all|v2", text: "Across your applications, apply with resume v2.", evidence: "v2: 6 of 9 got a response; other versions: 2 of 10." }];
+  it("accepts a rewrite whose numbers come from the evidence", async () => {
+    callTool.mockResolvedValueOnce({ rules: [{ key: "resume|all|v2", text: "Send resume v2; it got 6 of 9 responses." }] });
+    const [r] = await rewordRules({ rules });
+    expect(r.source).toBe("ai");
+  });
+  it("falls back when the rewrite invents a number or uses an em dash", async () => {
+    callTool.mockResolvedValueOnce({ rules: [{ key: "resume|all|v2", text: "Send resume v2; it doubles responses to 80%." }] });
+    expect((await rewordRules({ rules }))[0]).toMatchObject({ source: "rules", text: rules[0].text });
+    callTool.mockResolvedValueOnce({ rules: [{ key: "resume|all|v2", text: "Use resume v2 — it works better here." }] });
+    expect((await rewordRules({ rules }))[0].source).toBe("rules");
+  });
+});
+
+describe("draft guidance", () => {
+  it("passes the learned opener and rules to the model", async () => {
+    callTool.mockResolvedValueOnce(goodDraft);
+    await draftMessage({ ...baseInput, guidance: { opener: "shared_school", maxChars: 150, rules: ["Message alumni first."] } });
+    const prompt = String(callTool.mock.calls[0][0].user);
+    expect(prompt).toContain("Open with the shared school.");
+    expect(prompt).toContain("under 150 characters");
+    expect(prompt).toContain("Message alumni first.");
+  });
+  it("rules fallback leads with the role when guidance says role-led", async () => {
+    callTool.mockImplementation(async () => {
+      throw new Error("down");
+    });
+    const r = await draftMessage({ ...baseInput, guidance: { opener: "role_led", maxChars: null, rules: [] } });
+    expect(r.source).toBe("rules");
+    expect(r.draft.segments[0].text).not.toMatch(/Lakeshore/);
   });
 });
