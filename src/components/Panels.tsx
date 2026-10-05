@@ -1,27 +1,27 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { APP_STAGES, CONTACT_STAGES, type AppStage, type Application, type Contact, type ContactStage, type GapTag, type Profile } from "@/lib/schemas";
-import { computeInsights, isApplied, UNLOCK_OUTREACH } from "@/lib/insights";
-import { GAP_LABELS } from "@/lib/fit";
+import type { Application, GapTag, Profile } from "@/lib/schemas";
+import { computeInsights, rate, roleFamily } from "@/lib/insights";
+import { groupBy, jdPatterns, messageStats, outreachChains, resolvedApps, tierProgress, TIER_PATTERN, TIER_PERSONAL } from "@/lib/learn";
+import { stallPoints } from "@/lib/strategy";
 import { RECIPIENT_LABELS } from "@/lib/draft";
+import { refreshPlaybook, setRuleStatus } from "@/client/learning";
+import { Button, EvidenceBadge } from "./ui";
+import { GAP_LABELS } from "@/lib/fit";
 import { clearAll, db, EMPTY_PROFILE, saveProfile } from "@/client/db";
-import { offerSimilarCompanies } from "@/client/assistant";
 import { LineChart, pct, RateRow } from "./charts";
-import { IconClose, IconLock } from "./icons";
+import { IconClose } from "./icons";
+import { COMPANY_LABEL, isStatedReason, labelFor, OPENER_LABEL, REASON_LABEL, SENIORITY_LABEL } from "@/lib/labels";
 
-const APP_STAGE_LABEL: Record<AppStage, string> = { saved: "Saved", applied: "Applied", responded: "Responded", interview: "Interview", final_round: "Final round", offer: "Offer", rejected: "Rejected" };
-const CONTACT_STAGE_LABEL: Record<ContactStage, string> = { drafted: "Drafted", sent: "Sent", accepted: "Accepted", messaged: "Messaged", replied: "Replied", referral: "Referral" };
-const FOLLOW_UP_DAYS = 3;
-
-export function PanelFrame({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+export function PanelFrame({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return (
-    <aside className="fixed inset-y-0 right-0 z-40 flex w-full max-w-[34rem] flex-col border-l border-line bg-surface shadow-[-12px_0_40px_-24px_rgba(0,0,0,0.35)]" role="dialog" aria-modal="false" aria-label={title}>
+    <aside className={`fixed inset-y-0 right-0 z-40 flex w-full ${wide ? "max-w-[44rem]" : "max-w-[34rem]"} flex-col border-l border-line bg-surface shadow-[-12px_0_40px_-24px_rgba(0,0,0,0.35)]`} role="dialog" aria-modal="false" aria-label={title}>
       <header className="flex items-center justify-between border-b border-line px-5 py-3.5">
         <h2 className="text-[16px] font-semibold">{title}</h2>
         <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-ink-2 hover:bg-sunk" aria-label={`Close ${title}`}>
@@ -39,144 +39,221 @@ function useRecords(demo: boolean) {
   return { apps, contacts };
 }
 
-async function setAppStage(a: Application, stage: AppStage, chatId: string | null) {
-  const next = { ...a, stage, history: [...a.history, { stage, at: Date.now() }] };
-  await db.applications.put(next);
-  if (stage === "rejected" && chatId) await offerSimilarCompanies(next, chatId);
-}
-
-async function setContactStage(c: Contact, stage: ContactStage) {
-  await db.contacts.update(c.id, { stage, history: [...c.history, { stage, at: Date.now() }] });
-}
-
-export function TrackerPanel({ demo, chatId, onClose }: { demo: boolean; chatId: string | null; onClose: () => void }) {
+export function InsightsPanel({ demo, onClose }: { demo: boolean; onClose: () => void }) {
   const { apps, contacts } = useRecords(demo);
-  const applied = apps.filter(isApplied);
-  const covered = applied.filter((a) => contacts.some((c) => c.applicationId === a.id && c.stage !== "drafted")).length;
   const [now] = useState(() => Date.now());
+  const rules = useLiveQuery(() => db.playbook.filter((r) => r.demo === demo).toArray(), [demo]) ?? [];
+  const resolvedCount = resolvedApps(apps, now).length;
+  useEffect(() => {
+    void refreshPlaybook(demo);
+  }, [demo, resolvedCount, contacts.length]);
+
+  if (!apps.length) {
+    return (
+      <PanelFrame title="Insights" onClose={onClose}>
+        <div className="py-8 text-center">
+          <p className="text-[15px] font-medium">Nothing to learn from yet</p>
+          <p className="mx-auto mt-1 max-w-[38ch] text-[13.5px] text-ink-2">
+            Paste a job post or add an application in the Tracker. Suggestions start from the job post itself and get personal after {TIER_PERSONAL} outcomes.
+          </p>
+          <p className="mt-6 text-[13px] text-ink-3">Want to see it first? Turn on demo data in the sidebar.</p>
+        </div>
+      </PanelFrame>
+    );
+  }
+
+  const ins = computeInsights(apps, contacts);
+  const progress = tierProgress(apps, now);
+  const resolved = resolvedApps(apps, now);
+  const messaged = contacts.filter((c) => c.message);
+  const openers = messageStats(messaged, now, (c) => c.message!.opener).map((x) => rate(x.key, x.s, x.n));
+  const types = messageStats(messaged, now, (c) => c.recipientType).map((x) => rate(x.key, x.s, x.n));
+  const chains = outreachChains(apps, contacts, now);
+  const patterns = jdPatterns(resolved);
+  const stalls = stallPoints(apps);
+  const famVersion = groupBy(resolved, (r) => `${roleFamily(r.app.role)}|${r.app.resumeVersion}`);
+  const reasons = apps.filter((a) => a.outcome && a.outcome.reasonCategory !== "none_given");
+  const stated = reasons.filter((a) => isStatedReason(a.outcome!.reasonSource));
+  const guessed = reasons.filter((a) => !isStatedReason(a.outcome!.reasonSource));
+  const next = progress.tier === "job_post" ? TIER_PERSONAL : progress.tier === "early" ? TIER_PATTERN : null;
+  const visibleRules = rules.filter((r) => r.status !== "rejected" && r.current).sort((x, y) => (x.status === y.status ? 0 : x.status === "accepted" ? -1 : 1));
 
   return (
-    <PanelFrame title={demo ? "Tracker (demo data)" : "Tracker"} onClose={onClose}>
-      <p className="text-[13.5px] text-ink-2">
-        Outreach coverage: <span className="font-medium text-ink">{applied.length ? pct(covered / applied.length) : "0%"}</span> of applied roles have at least one sent message ({covered} of {applied.length}).
-      </p>
-      {apps.length === 0 && <p className="mt-6 text-[14px] text-ink-3">Nothing tracked yet. Paste a job description in the chat and it shows up here.</p>}
-      <ul className="mt-4 space-y-3">
-        {[...apps].reverse().map((a) => {
-          const cs = contacts.filter((c) => c.applicationId === a.id);
-          return (
-            <li key={a.id} className="rounded-xl border border-line p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-[14.5px] font-medium">{a.role}</p>
-                  <p className="text-[12.5px] text-ink-3">
-                    {a.company ?? "Company not detected"}
-                    {a.fit ? ` · fit ${a.fit.score}` : ""} · resume {a.resumeVersion}
-                  </p>
-                </div>
-                <label className="shrink-0">
-                  <span className="sr-only">Stage for {a.role}</span>
-                  <select className="rounded-lg border border-line bg-paper px-2 py-1 text-[13px]" value={a.stage} onChange={(e) => void setAppStage(a, e.target.value as AppStage, chatId)}>
-                    {APP_STAGES.map((s) => (
-                      <option key={s} value={s}>{APP_STAGE_LABEL[s]}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              {cs.length > 0 && (
-                <ul className="mt-2 space-y-1.5 border-t border-line pt-2">
-                  {cs.map((c) => {
-                    const last = c.history[c.history.length - 1]?.at ?? c.createdAt;
-                    const due = c.stage === "accepted" && now - last > FOLLOW_UP_DAYS * 86_400_000;
-                    return (
-                      <li key={c.id} className="flex items-center justify-between gap-2 text-[13px]">
-                        <span className="min-w-0 truncate">
-                          {c.firstName ?? "Contact"} <span className="text-ink-3">· {RECIPIENT_LABELS[c.recipientType]} · {c.variant === "A" ? "template" : "AI draft"}</span>
-                          {due && <span className="ml-2 rounded bg-warn-soft px-1.5 text-[11.5px] text-warn">Follow up</span>}
-                        </span>
-                        <label>
-                          <span className="sr-only">Stage for {c.firstName ?? "contact"}</span>
-                          <select className="rounded-md border border-line bg-paper px-1.5 py-0.5 text-[12.5px]" value={c.stage} onChange={(e) => void setContactStage(c, e.target.value as ContactStage)}>
-                            {CONTACT_STAGES.map((s) => (
-                              <option key={s} value={s}>{CONTACT_STAGE_LABEL[s]}</option>
-                            ))}
-                          </select>
-                        </label>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+    <PanelFrame title={demo ? "Insights (demo data)" : "Insights"} onClose={onClose}>
+      <div className="space-y-7">
+        <section className="rounded-xl border border-line p-4" aria-label="How much the app has learned">
+          <div className="flex flex-wrap items-center gap-2">
+            <EvidenceBadge tier={progress.tier} />
+            <span className="text-[13.5px] text-ink-2">
+              {progress.resolved} outcome{progress.resolved === 1 ? "" : "s"}: {progress.successes} got a response, {progress.failures} didn&apos;t
+            </span>
+          </div>
+          {next && (
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-grid" role="progressbar" aria-label="Progress to the next evidence level" aria-valuemin={0} aria-valuemax={next} aria-valuenow={Math.min(progress.resolved, next)}>
+              <div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(1, progress.resolved / next) * 100}%` }} />
+            </div>
+          )}
+          <p className="mt-2 text-[12.5px] text-ink-3">{progress.next} A success is any response; a failure is a rejection or no response after 21 days.</p>
+        </section>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Tile label="Application to interview" value={pct(ins.interviewConversion.rate)} sub={`${ins.interviewConversion.k} of ${ins.interviewConversion.n} applications`} />
+          <Tile label="Average alignment" value={ins.avgAlignment === null ? "None yet" : String(ins.avgAlignment)} sub="fit score out of 100" />
+        </div>
+
+        <Block title="Your playbook" note="Rules learned from your own outcomes. Accepted rules shape every suggestion and AI draft.">
+          {visibleRules.length === 0 ? (
+            <p className="text-[13.5px] text-ink-3">{progress.tier === "job_post" ? `Rules appear once personal suggestions start (${TIER_PERSONAL} outcomes with at least one response and one without).` : "No clear rules yet. They appear when one choice clearly beats the alternatives."}</p>
+          ) : (
+            <ul className="space-y-2.5">
+              {visibleRules.map((r) => (
+                <li key={r.id} className={`rounded-lg border p-3 ${r.status === "accepted" ? "border-accent/50 bg-accent-soft/40" : "border-line"}`}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <EvidenceBadge tier={r.tier} />
+                    <span className="text-[11.5px] uppercase tracking-wide text-ink-3">{r.scope === "message" ? "Outreach" : r.scope === "resume" ? "Resume" : "Targeting"}{r.family ? ` · ${r.family}` : ""}</span>
+                    {r.status === "accepted" && <span className="text-[11.5px] font-medium text-accent">In use</span>}
+                  </div>
+                  <p className="mt-1 text-[14.5px] font-medium">{r.text}</p>
+                  <p className="text-[12.5px] text-ink-2">{r.evidence}</p>
+                  <div className="mt-2 flex gap-1">
+                    {r.status !== "accepted" && <Button variant="primary" className="!px-2.5 !py-1 !text-[12.5px]" onClick={() => void setRuleStatus(r.id, "accepted")}>Use this rule</Button>}
+                    {r.status === "accepted" ? (
+                      <Button variant="ghost" className="!px-2.5 !py-1 !text-[12.5px]" onClick={() => void setRuleStatus(r.id, "proposed")}>Stop using</Button>
+                    ) : (
+                      <Button variant="ghost" className="!px-2.5 !py-1 !text-[12.5px]" onClick={() => void setRuleStatus(r.id, "rejected")}>Dismiss</Button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {rules.some((r) => !r.current && r.status === "accepted") && <p className="mt-2 text-[12.5px] text-warn">Some accepted rules are no longer supported by your latest outcomes, so they&apos;re paused.</p>}
+        </Block>
+
+        <Block title="Which openings get accepted" note="Share of sent invites that were accepted or better, by how the message opened.">
+          {openers.length ? openers.map((r) => <RateRow key={r.key} r={r} label={labelFor(OPENER_LABEL, r.key)} />) : <Empty>Copy a few drafts and update their stage in the Tracker.</Empty>}
+        </Block>
+        <Block title="Who accepts">
+          {types.length ? types.map((r) => <RateRow key={r.key} r={r} label={labelFor(RECIPIENT_LABELS, r.key)} />) : <Empty>No resolved invites yet.</Empty>}
+        </Block>
+        <Block title="From outreach to outcome" note="Your best-performing threads, from the first message to the furthest result.">
+          {chains.length ? (
+            <ul className="space-y-2">
+              {chains.map((c) => (
+                <li key={c.appId} className="text-[13px]">
+                  <p className="font-medium">{c.role}{c.company ? ` · ${c.company}` : ""}</p>
+                  <p className="text-ink-2">{c.steps.join(" → ")}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Empty>Chains appear once a drafted message is linked to an application.</Empty>
+          )}
+        </Block>
+        <Block title="Role family × resume version" note="Response rate for each combination you've tried.">
+          {famVersion.length ? famVersion.map((l) => {
+            const [fam, ver] = l.level.split("|");
+            return <RateRow key={l.level} r={rate(l.level, l.s, l.n)} label={`${fam} · ${ver}`} />;
+          }) : <Empty>No outcomes yet.</Empty>}
+        </Block>
+        <Block title="Job-post patterns" note="Words in postings that go with a higher or lower response rate for you.">
+          {patterns.length ? (
+            <ul className="space-y-1 text-[13.5px]">
+              {patterns.map((t) => (
+                <li key={t.term} className="flex justify-between gap-3">
+                  <span>“{t.term}”</span>
+                  <span className="tabular-nums text-ink-2">
+                    with: {t.with.s}/{t.with.n} · without: {t.without.s}/{t.without.n}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Empty>Needs a few outcomes across different postings.</Empty>
+          )}
+        </Block>
+
+        <Block title="Where rejections happen">
+          {stalls.length ? (
+            <ul className="space-y-1 text-[14px]">
+              {stalls.map((x) => (
+                <li key={x.label} className="flex justify-between"><span>{x.label}</span><span className="tabular-nums text-ink-2">{x.count}</span></li>
+              ))}
+            </ul>
+          ) : (
+            <Empty>No rejections logged.</Empty>
+          )}
+        </Block>
+        <Block title="Rejection reasons" note="What employers actually said, kept separate from guesses.">
+          {reasons.length ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ReasonList title={`Stated by the employer (${stated.length})`} apps={stated} />
+              <ReasonList title={`My guesses (${guessed.length})`} apps={guessed} />
+            </div>
+          ) : (
+            <Empty>Use “Log outcome” in the Tracker to record reasons.</Empty>
+          )}
+        </Block>
+
+        <Block title="Fit score over time">
+          <LineChart points={ins.fitTrend.map((t) => ({ x: t.week, y: t.avg, note: `${t.n} posts` }))} yMax={100} yLabel="Average fit score by week" />
+        </Block>
+        <Block title="Rejection rate by role" note="Bars show the rate; the thin line is the 95% range.">
+          {ins.rejectionByRole.map((r) => <RateRow key={r.key} r={r} />)}
+        </Block>
+        <Block title="Rejection rate by seniority">
+          {ins.rejectionBySeniority.map((r) => <RateRow key={r.key} r={r} label={labelFor(SENIORITY_LABEL, r.key)} />)}
+        </Block>
+        <Block title="Most frequent resume gaps">
+          <ul className="space-y-1 text-[14px]">
+            {ins.topGaps.map((g) => (
+              <li key={g.tag} className="flex justify-between"><span>{GAP_LABELS[g.tag as GapTag]}</span><span className="tabular-nums text-ink-2">{g.count}</span></li>
+            ))}
+          </ul>
+        </Block>
+        <Block title="Resume versions" note="Response rate, then interview rate.">
+          {ins.resumeVersions.map((v) => (
+            <div key={v.version}>
+              <RateRow r={v.response} label={`${v.version} response`} />
+              <RateRow r={v.interview} label={`${v.version} interview`} />
+            </div>
+          ))}
+        </Block>
+        <Block title="Response rate by company type">
+          {ins.responseByCompanyType.map((r) => <RateRow key={r.key} r={r} label={labelFor(COMPANY_LABEL, r.key)} />)}
+        </Block>
+        <Block title="Roles with the strongest alignment">
+          <ul className="space-y-1 text-[14px]">
+            {ins.strongestRoles.map((r) => (
+              <li key={r.family} className="flex justify-between gap-3">
+                <span>{r.family}</span>
+                <span className="tabular-nums text-ink-2">fit {r.avgFit} · {r.n} applied</span>
+              </li>
+            ))}
+          </ul>
+        </Block>
+      </div>
     </PanelFrame>
   );
 }
 
-export function InsightsPanel({ demo, onClose }: { demo: boolean; onClose: () => void }) {
-  const { apps, contacts } = useRecords(demo);
-  const ins = computeInsights(apps, contacts);
+function Empty({ children }: { children: React.ReactNode }) {
+  return <p className="text-[13px] text-ink-3">{children}</p>;
+}
+
+function ReasonList({ title, apps }: { title: string; apps: Application[] }) {
+  const counts = new Map<string, number>();
+  for (const a of apps) counts.set(a.outcome!.reasonCategory, (counts.get(a.outcome!.reasonCategory) ?? 0) + 1);
   return (
-    <PanelFrame title={demo ? "Insights (demo data)" : "Insights"} onClose={onClose}>
-      {!ins.unlocked ? (
-        <div className="py-8 text-center">
-          <IconLock width={28} height={28} className="mx-auto text-ink-3" />
-          <p className="mt-3 text-[15px] font-medium">Insights unlock after {UNLOCK_OUTREACH} sent messages</p>
-          <p className="mx-auto mt-1 max-w-[36ch] text-[13.5px] text-ink-2">With fewer, the patterns are mostly noise. Copying a draft counts it as sent.</p>
-          <div className="mx-auto mt-4 h-2 w-56 overflow-hidden rounded-full bg-grid" role="progressbar" aria-valuemin={0} aria-valuemax={UNLOCK_OUTREACH} aria-valuenow={ins.outreachCount}>
-            <div className="h-full bg-accent" style={{ width: `${(ins.outreachCount / UNLOCK_OUTREACH) * 100}%` }} />
-          </div>
-          <p className="mt-2 text-[13px] tabular-nums text-ink-3">{ins.outreachCount} of {UNLOCK_OUTREACH}</p>
-          <p className="mt-6 text-[13px] text-ink-3">Want to see it first? Turn on demo data in the sidebar.</p>
-        </div>
-      ) : (
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-3">
-            <Tile label="Application to interview" value={ins.interviewConversion.enough ? pct(ins.interviewConversion.rate) : "Too few"} sub={`${ins.interviewConversion.k} of ${ins.interviewConversion.n} applications`} />
-            <Tile label="Average alignment" value={ins.avgAlignment === null ? "None yet" : String(ins.avgAlignment)} sub="fit score out of 100" />
-          </div>
-          <Block title="Fit score over time">
-            <LineChart points={ins.fitTrend.map((t) => ({ x: t.week, y: t.avg, note: `${t.n} posts` }))} yMax={100} yLabel="Average fit score by week" />
-          </Block>
-          <Block title="Rejection rate by role" note="Bars show the rate; the thin line is the 95% range.">
-            {ins.rejectionByRole.map((r) => <RateRow key={r.key} r={r} />)}
-          </Block>
-          <Block title="Rejection rate by seniority">
-            {ins.rejectionBySeniority.map((r) => <RateRow key={r.key} r={r} />)}
-          </Block>
-          <Block title="Most frequent resume gaps">
-            <ul className="space-y-1 text-[14px]">
-              {ins.topGaps.map((g) => (
-                <li key={g.tag} className="flex justify-between"><span>{GAP_LABELS[g.tag as GapTag]}</span><span className="tabular-nums text-ink-2">{g.count}</span></li>
-              ))}
-            </ul>
-          </Block>
-          <Block title="Resume versions" note="Response rate, then interview rate.">
-            {ins.resumeVersions.map((v) => (
-              <div key={v.version}>
-                <RateRow r={v.response} label={`${v.version} response`} />
-                <RateRow r={v.interview} label={`${v.version} interview`} />
-              </div>
-            ))}
-          </Block>
-          <Block title="Response rate by company type">
-            {ins.responseByCompanyType.map((r) => <RateRow key={r.key} r={r} />)}
-          </Block>
-          <Block title="Roles with the strongest alignment">
-            <ul className="space-y-1 text-[14px]">
-              {ins.strongestRoles.map((r) => (
-                <li key={r.family} className="flex justify-between gap-3">
-                  <span>{r.family}</span>
-                  <span className="tabular-nums text-ink-2">fit {r.avgFit} · {r.n} applied</span>
-                </li>
-              ))}
-            </ul>
-          </Block>
-        </div>
-      )}
-    </PanelFrame>
+    <div>
+      <p className="text-[12.5px] text-ink-3">{title}</p>
+      <ul className="mt-1 space-y-0.5 text-[13.5px]">
+        {[...counts.entries()].sort((x, y) => y[1] - x[1]).map(([k, n]) => (
+          <li key={k} className="flex justify-between gap-2"><span>{labelFor(REASON_LABEL, k)}</span><span className="tabular-nums text-ink-2">{n}</span></li>
+        ))}
+        {!counts.size && <li className="text-ink-3">None</li>}
+      </ul>
+    </div>
   );
 }
 
