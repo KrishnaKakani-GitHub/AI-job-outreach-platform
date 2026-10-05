@@ -10,6 +10,13 @@ export const STOPWORDS = new Set(
   ).split(" "),
 );
 
+/** Verbs and generic words that show up in requirements but aren't skills you can show. Stemmed. */
+export const GENERIC_TERMS: Set<string> = new Set(
+  "own run analyze build work communicate communication decision decisions clear clearly write strong end-to-end ship lead independent independently reliable define use data insight insights stakeholder stakeholders business cross-functional partner collaborate"
+    .split(" ")
+    .map((w) => (w.length <= 4 ? w : w.replace(/(ing|ed|es|s|ly|ment|ation|ations)$/, "") || w)),
+);
+
 export function normalize(s: string): string {
   return s
     .toLowerCase()
