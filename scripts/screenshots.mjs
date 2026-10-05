@@ -28,13 +28,13 @@ if (which === "all" || which === "flowA") await run("03-flow-a", { variant: "A",
 if (which === "all" || which === "dark") await run("04-dark", { dark: true, steps: example });
 if (which === "all" || which === "mobile") await run("05-mobile", { width: 390, height: 844, steps: example });
 if (which === "all" || which === "insights") await run("06-insights", { steps: async (page) => {
-  await page.getByRole("switch").check();
+  await page.getByRole("switch", { name: "Demo data" }).click();
   await page.waitForTimeout(500);
   await page.getByRole("button", { name: /^Insights/ }).first().click();
   await page.waitForTimeout(800);
 }});
 if (which === "all" || which === "strategy") await run("07-strategy", { steps: async (page) => {
-  await page.getByRole("switch").check();
+  await page.getByRole("switch", { name: "Demo data" }).click();
   await page.waitForTimeout(500);
   await page.getByRole("button", { name: /What should I do next/ }).click();
   await page.waitForSelector('[aria-label="Next steps"]', { timeout: 20000 });
@@ -45,6 +45,57 @@ if (which === "all" || which === "followup") await run("08-followup", { dark: tr
   await example(page);
   await page.getByLabel("Stage").selectOption("accepted_followup");
   await page.waitForTimeout(1500);
+}});
+
+const demoOn = async (page) => {
+  await page.getByRole("switch", { name: "Demo data" }).click();
+  await page.waitForTimeout(600);
+};
+if (which === "all" || which === "tracker") await run("09-tracker", { steps: async (page) => {
+  await demoOn(page);
+  await page.getByRole("button", { name: "Tracker" }).first().click();
+  await page.waitForTimeout(700);
+}});
+if (which === "all" || which === "network") await run("10-network", { steps: async (page) => {
+  await demoOn(page);
+  await page.getByRole("button", { name: "Tracker" }).first().click();
+  await page.getByRole("tab", { name: /Network/ }).click();
+  await page.waitForTimeout(500);
+}});
+if (which === "all" || which === "outcome") await run("11-outcome", { steps: async (page) => {
+  await demoOn(page);
+  await page.getByRole("button", { name: "Tracker" }).first().click();
+  await page.getByRole("button", { name: "Log outcome" }).first().click();
+  await page.waitForTimeout(500);
+}});
+if (which === "all" || which === "addapp") await run("12-add-app", { width: 390, height: 844, steps: async (page) => {
+  await page.getByRole("button", { name: "Tracker" }).first().click().catch(async () => {
+    await page.getByRole("button", { name: "Open menu" }).click();
+    await page.getByRole("button", { name: "Tracker" }).first().click();
+  });
+  await page.getByRole("button", { name: "Add application" }).click();
+  await page.waitForTimeout(500);
+}});
+
+if (which === "all" || which === "craft") await run("13-craft", { height: 1100, steps: async (page) => {
+  await demoOn(page);
+  await example(page);
+  await page.evaluate(() => document.querySelector('[aria-label="Craft this application"]')?.scrollIntoView({ block: "start" }));
+  await page.waitForTimeout(800);
+}});
+if (which === "all" || which === "playbook") await run("14-playbook", { height: 1000, steps: async (page) => {
+  await demoOn(page);
+  await page.getByRole("button", { name: /^Insights/ }).first().click();
+  await page.waitForTimeout(1500);
+  await page.getByRole("button", { name: "Use this rule" }).first().click();
+  await page.waitForTimeout(400);
+}});
+if (which === "all" || which === "working") await run("15-whats-working", { height: 1000, steps: async (page) => {
+  await demoOn(page);
+  await page.getByRole("button", { name: /^Insights/ }).first().click();
+  await page.waitForTimeout(1200);
+  await page.getByText("Which openings get accepted").scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400);
 }});
 
 // Public pages

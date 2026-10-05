@@ -62,3 +62,66 @@ test("no serious accessibility violations on key screens", async ({ page }) => {
     expect(serious.map((v) => `${t}: ${v.id} (${v.nodes.length})`)).toEqual([]);
   }
 });
+
+test("tracker: add an application, filter, log an outcome, export a backup", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Tracker" }).first().click();
+  await page.getByRole("button", { name: "Add application" }).click();
+  const dlg = page.getByRole("dialog", { name: "Add application" });
+  await dlg.getByLabel("Role").fill("Analytics Engineer");
+  await dlg.getByLabel("Company").fill("Example Health");
+  await dlg.getByRole("button", { name: "Save" }).last().click();
+  await expect(page.getByText("Analytics Engineer", { exact: true })).toBeVisible();
+
+  await page.getByLabel("Search applications").fill("no-such-role");
+  await expect(page.getByText("No applications match these filters.")).toBeVisible();
+  await page.getByLabel("Search applications").fill("");
+
+  await page.getByRole("button", { name: "Log outcome" }).first().click();
+  const o = page.getByRole("dialog", { name: "Log an outcome" });
+  await o.getByLabel("What happened").selectOption("rejected");
+  await o.getByLabel(/^Reason/).selectOption("experience_level");
+  await o.getByLabel("Where the reason came from").selectOption("recruiter");
+  await o.getByRole("button", { name: "Save outcome" }).click();
+  await expect(page.getByText(/Rejected · Experience level/)).toBeVisible();
+
+  const [dl] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Export backup" }).click()]);
+  expect(dl.suggestedFilename()).toMatch(/^warm-intro-backup-.*\.json$/);
+});
+
+test("craft card starts from the job post, then gets personal with history", async ({ page }) => {
+  await page.goto("/?variant=B");
+  await page.getByRole("button", { name: /Try it with a sample/ }).click();
+  const fresh = page.getByRole("article", { name: "Craft this application" });
+  await expect(fresh.getByText("Based on this job post").first()).toBeVisible();
+
+  await page.getByRole("button", { name: /New chat/ }).click();
+  await page.getByRole("switch", { name: "Demo data" }).click();
+  await page.getByRole("button", { name: /Try it with a sample/ }).click();
+  const craft = page.getByRole("article", { name: "Craft this application" });
+  await expect(craft.getByText(/Pattern|Early signal/).first()).toBeVisible();
+  await expect(craft.getByText(/\d+ of \d+/).first()).toBeVisible();
+});
+
+test("playbook: learned rules can be accepted from Insights", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("switch", { name: "Demo data" }).click();
+  await page.getByRole("button", { name: /^Insights/ }).first().click();
+  const panel = page.getByRole("dialog", { name: /Insights/ });
+  await expect(panel.getByText("Your playbook")).toBeVisible();
+  await panel.getByRole("button", { name: "Use this rule" }).first().click();
+  await expect(panel.getByText("In use").first()).toBeVisible();
+});
+
+test("tracker and insights have no serious accessibility violations", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("switch", { name: "Demo data" }).click();
+  for (const name of ["Tracker", "Insights"]) {
+    await page.getByRole("button", { name: new RegExp(`^${name}`) }).first().click();
+    await expect(page.getByRole("dialog", { name: new RegExp(name) })).toBeVisible();
+    const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
+    const serious = r.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
+    expect(serious.map((v) => `${name}: ${v.id} (${v.nodes.length}) ${v.nodes[0]?.target}`)).toEqual([]);
+    await page.keyboard.press("Escape");
+  }
+});
