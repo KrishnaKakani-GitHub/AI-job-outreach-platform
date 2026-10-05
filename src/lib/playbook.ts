@@ -9,10 +9,14 @@
  */
 import { z } from "zod";
 import type { Application, Contact } from "./schemas";
+import { SKILL_IDS, type RuleTarget, type SkillId } from "./skills/catalog";
+import { LEARNED_TIERS, RULE_ORIGINS, type RuleOrigin } from "./skills/context";
+import { jobTypeProfiles } from "./jobtypes";
 import { GAP_LABELS } from "./fit";
-import { roleFamily } from "./insights";
+import { familyOf } from "./insights";
 import {
   appFeatures,
+  appOutcome,
   bestContrast,
   comparisonTier,
   groupBy,
@@ -34,7 +38,33 @@ export interface RuleCandidate {
   family: string | null;
   text: string;
   evidence: string;
-  tier: Exclude<Tier, "job_post">;
+  tier: Exclude<Tier, "job_post"> | "notes";
+  /** The skill this rule extends. */
+  skill: SkillId;
+  origin: RuleOrigin;
+  /** Applications a notes-derived rule was drawn from. */
+  appIds?: string[];
+}
+
+const SCOPE_TARGET: Record<RuleScope, RuleTarget> = { resume: "cv", message: "message", targeting: "targeting" };
+
+/** Id used in traces and scores for a learned rule. */
+export function learnedId(key: string): string {
+  return `learned/${key}`;
+}
+
+/** Which skill an older stored rule (saved before skills existed) belongs to, from its key. */
+export function skillOfKey(key: string): SkillId {
+  const k = key.split("|")[0];
+  if (k === "resume") return "resume-version-manager";
+  if (k === "gap" || k === "lead" || k === "cover") return k === "cover" ? "resume-ats-optimizer" : "resume-tailor";
+  if (k === "opener" || k === "recipient" || k === "length" || k === "network") return "cold-email-writer";
+  if (k === "interview") return "interview-prep-generator";
+  return "job-description-analyzer";
+}
+
+export function targetOf(r: Pick<PlaybookRule, "scope" | "key">): RuleTarget {
+  return r.key.startsWith("interview|") ? "interview" : SCOPE_TARGET[r.scope];
 }
 
 export const PlaybookRule = z.object({
@@ -43,7 +73,10 @@ export const PlaybookRule = z.object({
   family: z.string().max(80).nullable(),
   text: z.string().max(300),
   evidence: z.string().max(400),
-  tier: z.enum(["early", "pattern", "strong"]),
+  tier: z.enum(LEARNED_TIERS),
+  skill: z.enum(SKILL_IDS).optional(),
+  origin: z.enum(RULE_ORIGINS).optional(),
+  appIds: z.array(z.string().max(80)).max(20).optional(),
   status: z.enum(["proposed", "accepted", "rejected"]),
   /** False when the latest data no longer supports the rule. */
   current: z.boolean(),
@@ -74,12 +107,20 @@ const frac = (s: number, n: number) => `${s} of ${n}`;
 /** Every rule the data currently supports. Empty until personal suggestions are unlocked. */
 export function ruleCandidates(apps: Application[], contacts: Contact[], now: number): RuleCandidate[] {
   if (tierProgress(apps, now).tier === "job_post") return [];
+  return [
+    ...outcomeCandidates(apps, contacts, now).map((c) => ({ ...c, skill: skillOfKey(c.key), origin: "outcomes" as const })),
+    ...jobTypeCandidates(apps, now),
+    ...leadQuoteCandidates(apps, contacts, now),
+  ];
+}
+
+function outcomeCandidates(apps: Application[], contacts: Contact[], now: number): Omit<RuleCandidate, "skill" | "origin">[] {
   const resolved = resolvedApps(apps, now);
-  const out: RuleCandidate[] = [];
-  const families = [...new Set(resolved.map((r) => roleFamily(r.app.role)))];
+  const out: Omit<RuleCandidate, "skill" | "origin">[] = [];
+  const families = [...new Set(resolved.map((r) => familyOf(r.app)))];
 
   for (const fam of [null, ...families]) {
-    const pool = fam ? resolved.filter((r) => roleFamily(r.app.role) === fam) : resolved;
+    const pool = fam ? resolved.filter((r) => familyOf(r.app) === fam) : resolved;
     const s = pool.filter((r) => r.outcome === "success").length;
     if (pool.length < 5 || s === 0 || s === pool.length) continue;
     const scopeTxt = fam ? `For ${fam} roles` : "Across your applications";
@@ -130,7 +171,7 @@ export function ruleCandidates(apps: Application[], contacts: Contact[], now: nu
   }
 
   // Families that keep converting vs not at all (targeting).
-  const fams = groupBy(resolved, (r) => roleFamily(r.app.role)).filter((f) => f.n >= 4);
+  const fams = groupBy(resolved, (r) => familyOf(r.app)).filter((f) => f.n >= 4);
   const top = fams[0];
   const bottom = fams[fams.length - 1];
   if (top && bottom && top !== bottom && top.rate - bottom.rate >= 0.25) {
@@ -214,6 +255,80 @@ export function ruleCandidates(apps: Application[], contacts: Contact[], now: nu
   return out;
 }
 
+/** Rules from job-type patterns: requirements worth showing, and posts worth favoring. */
+export function jobTypeCandidates(apps: Application[], now: number): RuleCandidate[] {
+  const out: RuleCandidate[] = [];
+  for (const p of jobTypeProfiles(apps, now)) {
+    if (p.tier === "job_post") continue;
+    for (const c of p.coverage.slice(0, 2)) {
+      if (c.lift < 0.25) continue;
+      out.push({
+        key: `cover|${p.family}|${c.term.toLowerCase()}`,
+        scope: "resume",
+        family: p.family,
+        text: `For ${p.family} roles, when the post asks for "${c.term}", show it near the top of your resume, only where it's true.`,
+        evidence: `${p.family} posts asking for "${c.term}": shown on your resume ${frac(c.covered.s, c.covered.n)} got a response; not shown ${frac(c.uncovered.s, c.uncovered.n)}.`,
+        tier: c.tier,
+        skill: "resume-ats-optimizer",
+        origin: "job_type",
+      });
+    }
+    for (const f of p.posts.slice(0, 2)) {
+      out.push({
+        key: `post|${p.family}|${f.feature}|${f.best.level}`,
+        scope: "targeting",
+        family: p.family,
+        text: `For ${p.family} roles, favor posts where ${f.feature.toLowerCase()} is "${f.best.level}".`,
+        evidence: `${p.family}, ${f.feature.toLowerCase()} "${f.best.level}": ${frac(f.best.s, f.best.n)} got a response; other posts ${frac(f.rest.s, f.rest.n)}.`,
+        tier: f.tier,
+        skill: "job-description-analyzer",
+        origin: "job_type",
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Outreach into the CV: a resume line your messages led with, when outreach
+ * that led with it went on to a response more often than your other outreach.
+ */
+export function leadQuoteCandidates(apps: Application[], contacts: Contact[], now: number): RuleCandidate[] {
+  const byApp = new Map(apps.map((a) => [a.id, a]));
+  const groups = new Map<string, { s: number; n: number; fams: Map<string, number> }>();
+  let total = { s: 0, n: 0 };
+  for (const c of contacts) {
+    const q = c.message?.leadQuote;
+    const a = c.applicationId ? byApp.get(c.applicationId) : undefined;
+    if (!q || !a) continue;
+    const o = appOutcome(a, now);
+    if (o === "pending") continue;
+    const g = groups.get(q) ?? { s: 0, n: 0, fams: new Map() };
+    g.n++;
+    if (o === "success") g.s++;
+    g.fams.set(familyOf(a), (g.fams.get(familyOf(a)) ?? 0) + 1);
+    groups.set(q, g);
+    total = { s: total.s + (o === "success" ? 1 : 0), n: total.n + 1 };
+  }
+  const out: RuleCandidate[] = [];
+  for (const [q, g] of groups) {
+    const rest = { s: total.s - g.s, n: total.n - g.n };
+    if (g.s < 2 || !rest.n || g.s / g.n - rest.s / rest.n < 0.2) continue;
+    const fam = [...g.fams.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    out.push({
+      key: `lead|${fam}|${q.toLowerCase().slice(0, 80)}`,
+      scope: "resume",
+      family: fam,
+      text: `For ${fam} roles, keep "${q}" in your top three bullets; it's what your successful outreach led with.`,
+      evidence: `Outreach leading with this line: ${frac(g.s, g.n)} applications got a response; other outreach: ${frac(rest.s, rest.n)}.`,
+      tier: comparisonTier(g.n, rest.n),
+      skill: "resume-tailor",
+      origin: "outreach",
+    });
+  }
+  return out.slice(0, 3);
+}
+
 /** Merge fresh candidates into stored rules, keeping the user's accept/reject decisions. */
 export function syncRules(stored: PlaybookRule[], candidates: RuleCandidate[], now: number): PlaybookRule[] {
   const byKey = new Map(stored.map((r) => [r.key, r]));
@@ -234,11 +349,14 @@ export function syncRules(stored: PlaybookRule[], candidates: RuleCandidate[], n
       source: evidenceChanged ? "rules" : prev.source,
       evidence: c.evidence,
       tier: c.tier,
+      skill: c.skill,
+      origin: c.origin,
       current: true,
       updatedAt: evidenceChanged ? now : prev.updatedAt,
     });
   }
-  for (const r of stored) if (!seen.has(r.key)) out.push({ ...r, current: false });
+  // Notes-derived rules aren't recomputed from counts; they keep their own state.
+  for (const r of stored) if (!seen.has(r.key)) out.push({ ...r, current: r.origin === "notes" ? r.current : false });
   return out;
 }
 
