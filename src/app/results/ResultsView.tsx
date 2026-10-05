@@ -9,6 +9,7 @@ import { H1, H2 } from "@/components/PageShell";
 interface Results {
   experiment: string;
   persistence: "postgres" | "memory";
+  startedAt: number | null;
   arms: ArmSummary[];
 }
 
@@ -80,11 +81,26 @@ export function ResultsView() {
         <p className="text-[14px] text-ink-3">Loading…</p>
       ) : (
         <>
-          <p className="max-w-[64ch] text-[15px] text-ink-2">
-            {total === 0
-              ? "No drafts yet. Results appear here as soon as people use the app."
-              : `${total} users have received a draft. ${total < needed * 2 ? `That's ${pct(total / (needed * 2))} of the planned sample, so treat any difference as directional.` : "The planned sample size is reached."}`}
-          </p>
+          <div className="rounded-2xl border border-line bg-surface p-5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-[15px] font-medium">
+                {data.startedAt ? `Running since ${new Date(data.startedAt).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}` : "Live and waiting for its first participant"}
+              </p>
+              <p className="text-[13.5px] tabular-nums text-ink-2">
+                {total} of {needed * 2} planned users
+              </p>
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-grid" role="progressbar" aria-label="Progress toward the planned sample" aria-valuemin={0} aria-valuemax={needed * 2} aria-valuenow={total}>
+              <div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(1, total / (needed * 2)) * 100}%` }} />
+            </div>
+            <p className="mt-3 max-w-[64ch] text-[14px] text-ink-2">
+              {total === 0
+                ? "Every person who drafts a message in the app joins the test. Numbers appear here with the first draft."
+                : total < needed * 2
+                  ? `That's ${pct(total / (needed * 2))} of the planned sample, so treat any difference below as directional.`
+                  : "The planned sample size is reached; the decision rule applies."}
+            </p>
+          </div>
           {a && b && total > 0 && (
             <div className="mt-5 rounded-2xl border border-line bg-surface p-5">
               <ArmBars

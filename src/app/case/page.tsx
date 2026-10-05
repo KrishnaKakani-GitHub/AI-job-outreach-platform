@@ -66,7 +66,8 @@ export default function CasePage() {
         <ul>
           <li><strong>Fit check:</strong> each requirement rated strong, partial or missing, with the resume line that proves it. The score is computed in code, never by the model.</li>
           <li><strong>Grounded draft:</strong> stage-aware (invite note, follow-up, referral ask), recipient-aware, color-coded by part. Every personal detail links to its source, and code rejects any name that appears in none of the documents.</li>
-          <li><strong>Tracker, Insights and next steps:</strong> after enough history, the app shows patterns with confidence ranges, a checklist built from recurring gaps, resume tweaks that never invent facts, and similar companies after a final-round rejection.</li>
+          <li><strong>Tracker:</strong> applications, contacts, sources, follow-ups and an outcome log that separates what employers said from guesses, plus LinkedIn import and backups.</li>
+          <li><strong>Learning loop:</strong> every new job gets a &ldquo;Craft this application&rdquo; card built from the difference between your applications that got a response and the ones that didn&apos;t. Each suggestion shows its reason, the past applications behind it, and an evidence label (job post only → early signal at 5 outcomes → pattern at 15 → strong at 30 per group). Rules you accept go into a personal playbook that shapes every draft, and message openings are chosen by Thompson sampling so the app keeps testing instead of locking in early luck.</li>
         </ul>
         <p><strong>Deliberately left out:</strong> auto-sending, LinkedIn scraping or login, accounts, server-side storage of documents, Gmail scanning, interview prep, and full resume rewrites (they tend to invent experience).</p>
         <p><strong>Design rule:</strong> the AI proposes; deterministic code validates and decides. If the model is unavailable or fails a check, the app falls back to a rules-based version instead of showing an unchecked draft.</p>
@@ -82,6 +83,9 @@ export default function CasePage() {
 
         <H2 id="s6">6. The iteration</H2>
         <p>What changes next is decided by the live result and by RICE scores for the candidate tests below (inputs are planning estimates).</p>
+        <p className="text-[14px] text-ink-3">
+          Tracker, outcome logging, network, and Insights features were adapted from Sanjana Gowda&apos;s AI Job Tracker and Rejection Analyzer (<a href="https://github.com/sanjana1311/job-tracker">github.com/sanjana1311/job-tracker</a>). The implementation is original.
+        </p>
       </Prose>
 
       <table className="mt-3 w-full max-w-3xl text-left text-[14px]">
@@ -110,7 +114,7 @@ export default function CasePage() {
         </tbody>
       </table>
 
-      <H2>How it was built against Stripe&apos;s operating principles</H2>
+      <H2>Operating principles behind the build</H2>
       <dl className="max-w-3xl divide-y divide-line border-y border-line">
         {PRINCIPLES.map(([p, how]) => (
           <div key={p} className="grid gap-1 py-3 sm:grid-cols-[14rem_1fr] sm:gap-4">
