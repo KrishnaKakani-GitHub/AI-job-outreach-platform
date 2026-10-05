@@ -125,13 +125,52 @@ export type SimilarCompany = z.infer<typeof SimilarCompany>;
 
 // ---- Persisted (IndexedDB) records ----
 
-export const APP_STAGES = ["saved", "applied", "responded", "interview", "final_round", "offer", "rejected"] as const;
+export const APP_STAGES = ["saved", "applied", "responded", "interview", "final_round", "offer", "rejected", "withdrawn"] as const;
 export const AppStage = z.enum(APP_STAGES);
 export type AppStage = z.infer<typeof AppStage>;
 
-export const CONTACT_STAGES = ["drafted", "sent", "accepted", "messaged", "replied", "referral"] as const;
+export const CONTACT_STAGES = ["not_contacted", "drafted", "sent", "accepted", "messaged", "replied", "referral"] as const;
 export const ContactStage = z.enum(CONTACT_STAGES);
 export type ContactStage = z.infer<typeof ContactStage>;
+
+/** How the application started. "referral" means someone referred you in. */
+export const APP_SOURCES = ["cold", "referral", "recruiter", "other"] as const;
+export const AppSource = z.enum(APP_SOURCES);
+export type AppSource = z.infer<typeof AppSource>;
+
+export const OUTCOME_RESULTS = ["rejected", "no_response", "withdrawn", "offer"] as const;
+export const OutcomeResult = z.enum(OUTCOME_RESULTS);
+export type OutcomeResult = z.infer<typeof OutcomeResult>;
+
+/** Reason categories, kept small so they can be counted across applications. */
+export const REASON_CATEGORIES = [
+  "none_given",
+  "experience_level",
+  "skills_gap",
+  "domain",
+  "position_filled",
+  "internal_candidate",
+  "other_candidates",
+  "location_or_visa",
+  "other",
+] as const;
+export const ReasonCategory = z.enum(REASON_CATEGORIES);
+export type ReasonCategory = z.infer<typeof ReasonCategory>;
+
+/** Where the reason came from. Only employer-sourced reasons count as "stated". */
+export const REASON_SOURCES = ["rejection_email", "recruiter", "interviewer_feedback", "my_guess", "none"] as const;
+export const ReasonSource = z.enum(REASON_SOURCES);
+export type ReasonSource = z.infer<typeof ReasonSource>;
+
+export const OutcomeLog = z.object({
+  at: z.number(),
+  result: OutcomeResult,
+  reasonCategory: ReasonCategory.default("none_given"),
+  reasonSource: ReasonSource.default("none"),
+  notes: z.string().max(2000).default(""),
+  learning: z.string().max(1000).default(""),
+});
+export type OutcomeLog = z.infer<typeof OutcomeLog>;
 
 export const Profile = z.object({
   id: z.literal("me"),
@@ -147,33 +186,68 @@ export type Profile = z.infer<typeof Profile>;
 export const StageEvent = z.object({ stage: z.string(), at: z.number() });
 
 export const Application = z.object({
-  id: z.string(),
+  id: z.string().min(1).max(80),
   createdAt: z.number(),
-  role: z.string(),
-  company: z.string().nullable(),
-  seniority: Seniority,
-  companyType: CompanyType,
+  role: z.string().max(200),
+  company: z.string().max(200).nullable(),
+  seniority: Seniority.default("unknown"),
+  companyType: CompanyType.default("unknown"),
   stage: AppStage,
-  history: z.array(StageEvent),
-  jobText: z.string(),
-  resumeVersion: z.string(),
-  fit: FitReport.nullable(),
+  history: z.array(StageEvent).default([]),
+  jobText: z.string().max(30000).default(""),
+  resumeVersion: z.string().max(40).default("v1"),
+  fit: FitReport.nullable().default(null),
   demo: z.boolean().default(false),
+  jobUrl: z.string().max(2000).nullable().default(null),
+  location: z.string().max(200).nullable().default(null),
+  appliedAt: z.number().nullable().default(null),
+  source: AppSource.default("cold"),
+  nextStep: z.string().max(300).nullable().default(null),
+  followUpAt: z.number().nullable().default(null),
+  notes: z.string().max(5000).default(""),
+  outcome: OutcomeLog.nullable().default(null),
+  /** Gap fixes the user says they applied to the resume for this application. */
+  tweaks: z.array(GapTag).default([]),
 });
 export type Application = z.infer<typeof Application>;
 
+/** How a message opened. Used to learn which openings get accepted. */
+export const OPENERS = ["shared_school", "shared_employer", "shared_field", "shared_other", "role_led", "template"] as const;
+export const Opener = z.enum(OPENERS);
+export type Opener = z.infer<typeof Opener>;
+
+export const MessageFeatures = z.object({
+  stage: Stage,
+  channel: Channel,
+  opener: Opener,
+  chars: z.number().int().min(0),
+  editRatio: z.number().min(0).max(1).nullable().default(null),
+  copiedAt: z.number().nullable().default(null),
+});
+export type MessageFeatures = z.infer<typeof MessageFeatures>;
+
+export const CONTACT_SOURCES = ["chat", "manual", "linkedin_import"] as const;
+
 export const Contact = z.object({
-  id: z.string(),
-  applicationId: z.string().nullable(),
+  id: z.string().min(1).max(80),
+  applicationId: z.string().nullable().default(null),
   createdAt: z.number(),
-  firstName: z.string().nullable(),
-  title: z.string().nullable(),
+  firstName: z.string().max(80).nullable(),
+  lastName: z.string().max(80).nullable().default(null),
+  title: z.string().max(200).nullable().default(null),
+  company: z.string().max(200).nullable().default(null),
   recipientType: RecipientType,
   stage: ContactStage,
-  history: z.array(StageEvent),
-  variant: z.enum(["A", "B"]),
-  channel: Channel,
+  history: z.array(StageEvent).default([]),
+  /** A/B arm of the drafted message; null for contacts added without a draft. */
+  variant: z.enum(["A", "B"]).nullable().default(null),
+  channel: Channel.default("linkedin"),
   demo: z.boolean().default(false),
+  source: z.enum(CONTACT_SOURCES).default("chat"),
+  linkedinUrl: z.string().max(500).nullable().default(null),
+  connectedOn: z.string().max(40).nullable().default(null),
+  notes: z.string().max(2000).default(""),
+  message: MessageFeatures.nullable().default(null),
 });
 export type Contact = z.infer<typeof Contact>;
 
