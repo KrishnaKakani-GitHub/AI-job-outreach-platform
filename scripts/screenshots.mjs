@@ -98,6 +98,52 @@ if (which === "all" || which === "working") await run("15-whats-working", { heig
   await page.waitForTimeout(400);
 }});
 
+const sampleCraft = async (page) => {
+  await demoOn(page);
+  await page.getByRole("button", { name: /Try it with a sample/ }).click();
+  await page.waitForSelector('[aria-label="Craft this application"]', { timeout: 30000 });
+};
+const tailor = async (page) => {
+  await sampleCraft(page);
+  await page.getByRole("button", { name: "Tailor my resume for this job" }).click();
+  await page.waitForSelector('[aria-label="Tailored resume"]', { timeout: 30000 });
+};
+const reveal = (label) => (page) => page.evaluate((l) => document.querySelector(`[aria-label="${l}"]`)?.scrollIntoView({ block: "start" }), label);
+if (which === "all" || which === "skills") await run("20-skills", { steps: async (page) => {
+  await demoOn(page);
+  await page.getByRole("button", { name: "Skills" }).first().click();
+  await page.waitForTimeout(1500);
+  await page.getByRole("button", { name: /^ATS optimizer/ }).click();
+  await page.waitForTimeout(400);
+}});
+if (which === "all" || which === "tailor") await run("21-tailor", { height: 1000, steps: async (page) => {
+  await tailor(page);
+  await reveal("Tailored resume")(page);
+  await page.waitForTimeout(500);
+}});
+if (which === "all" || which === "compare") await run("22-compare", { height: 1000, steps: async (page) => {
+  await tailor(page);
+  await page.getByRole("tab", { name: "Compare with baseline skills" }).click();
+  await page.waitForTimeout(2000);
+  await reveal("Tailored resume")(page);
+  await page.waitForTimeout(400);
+}});
+if (which === "all" || which === "jobtypes") await run("23-jobtypes", { height: 1000, steps: async (page) => {
+  await demoOn(page);
+  await page.getByRole("button", { name: /^Insights/ }).first().click();
+  await page.waitForTimeout(1200);
+  await page.getByText("By job type").scrollIntoViewIfNeeded();
+}});
+if (which === "all" || which === "interview") await run("25-interview", { height: 1000, steps: async (page) => {
+  await sampleCraft(page);
+  await page.waitForSelector('[aria-label="Outreach draft"]', { timeout: 30000 });
+  await page.getByRole("textbox").first().fill("interview prep please");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector('[aria-label="Interview prep"] ol', { timeout: 30000 });
+  await reveal("Interview prep")(page);
+  await page.waitForTimeout(400);
+}});
+
 // Public pages
 if (which === "all" || which === "pages") {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
