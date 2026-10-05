@@ -6,15 +6,27 @@
  * email, next steps) before falling back to a free-form streamed reply.
  */
 import { classifyDocument, extractRecipientMeta } from "@/lib/classify";
-import { templateDraft, STAGE_PARTS } from "@/lib/draft";
+import { openerOf, renderDraft, templateDraft, STAGE_PARTS } from "@/lib/draft";
+import { newApplication, newContact } from "@/lib/records";
 import { detectSharedGround } from "@/lib/shared";
 import { buildChecklist } from "@/lib/fit";
 import { finalRoundRejections, type StrategyFacts } from "@/lib/strategy";
-import type { AnatomyPart, Application, Channel, Contact, DocKind, FitReport, RecipientType, Stage, SimilarCompany } from "@/lib/schemas";
+import type { AnatomyPart, Application, Channel, Contact, DocKind, FitReport, MessageFeatures, RecipientType, Stage, SimilarCompany } from "@/lib/schemas";
 import type { DraftResult } from "@/server/services";
 import { uid } from "@/lib/text";
 import { addMessage, db, getProfile, saveProfile, updatePayload, type ChatMessage } from "./db";
-import { myVariant, track } from "./session";
+import { myVariant, prefs, track } from "./session";
+import { buildCraft, guidanceFor } from "./learning";
+import { tierProgress, type Craft, type DraftGuidance, type TierProgress } from "@/lib/learn";
+
+/** Demo mode keeps synthetic records separate from real ones. */
+export function isDemo(): boolean {
+  return prefs.get("wi-demo") === "1";
+}
+
+function messageFeatures(result: DraftResult, stage: Stage, channel: Channel, variant: "A" | "B"): MessageFeatures {
+  return { stage, channel, opener: openerOf(result.draft, result.shared, variant), chars: renderDraft(result.draft).length, editRatio: null, copiedAt: null };
+}
 
 export interface FitPayload {
   applicationId: string;
@@ -35,9 +47,16 @@ export interface DraftPayload {
   shownAt: number;
   copiedAt: number | null;
   error: string | null;
+  guidance?: DraftGuidance | null;
+}
+
+export interface CraftPayload {
+  applicationId: string;
+  craft: Craft;
 }
 
 export interface StrategyPayload {
+  progress?: TierProgress;
   facts: StrategyFacts;
   narrative: { summary: string; targetWhy: string[]; source: "ai" | "rules" };
 }
@@ -149,7 +168,7 @@ async function runFit(jobText: string, ctx: Ctx): Promise<void> {
   try {
     const report = await post<FitReport>("/api/ai/analyze", { jobText, resume: profile.resume, background: profile.background }, ctx.signal);
     const now = Date.now();
-    const app: Application = {
+    const app: Application = newApplication({
       id: uid(),
       createdAt: now,
       role: report.meta.role,
@@ -161,11 +180,11 @@ async function runFit(jobText: string, ctx: Ctx): Promise<void> {
       jobText,
       resumeVersion: profile.resumeVersion,
       fit: report,
-      demo: false,
-    };
+      demo: isDemo(),
+    });
     await db.applications.put(app);
     await db.chats.update(ctx.chatId, { applicationId: app.id, title: report.meta.company ? `${report.meta.role} · ${report.meta.company}` : report.meta.role });
-    const history = await db.applications.filter((a) => !a.demo && a.id !== app.id).sortBy("createdAt");
+    const history = await db.applications.filter((a) => a.demo === app.demo && a.id !== app.id).sortBy("createdAt");
     await addMessage({
       id: uid(),
       chatId: ctx.chatId,
@@ -173,6 +192,13 @@ async function runFit(jobText: string, ctx: Ctx): Promise<void> {
       kind: "fit",
       payload: { applicationId: app.id, report, checklist: buildChecklist(history, report) } satisfies FitPayload,
     });
+    try {
+      const craft = await buildCraft(app, isDemo());
+      await addMessage({ id: uid(), chatId: ctx.chatId, role: "assistant", kind: "craft", payload: { applicationId: app.id, craft } satisfies CraftPayload });
+    } catch (e) {
+      // The fit card already rendered; suggestions are additive.
+      console.warn(JSON.stringify({ level: "warn", event: "craft.failed", message: e instanceof Error ? e.message : String(e) }));
+    }
     if (!profile.resume && !profile.background) {
       await say(ctx, "Paste your resume too and I'll score this against your actual experience. Until then the fit check has nothing to compare with.");
     }
@@ -204,6 +230,7 @@ export async function runDraft(req: DraftRequest, ctx: Ctx): Promise<void> {
   ctx.setStatus({ label: "Checking shared ground…" });
   try {
     let result: DraftResult;
+    let guidance: DraftGuidance | null = null;
     const me = `${profile.background}\n${profile.resume}`.trim();
     if (variant === "A") {
       const shared = detectSharedGround(me, req.recipientText);
@@ -232,6 +259,7 @@ export async function runDraft(req: DraftRequest, ctx: Ctx): Promise<void> {
       };
     } else {
       ctx.setStatus({ label: "Drafting…" });
+      guidance = await guidanceFor(isDemo(), detectSharedGround(me, req.recipientText).map((s) => s.kind)).catch(() => null);
       result = await post<DraftResult>(
         "/api/ai/draft",
         {
@@ -248,29 +276,33 @@ export async function runDraft(req: DraftRequest, ctx: Ctx): Promise<void> {
           instruction: req.instruction ?? null,
           regeneratePart: req.regeneratePart ?? null,
           current: prev?.result.draft ?? null,
+          guidance: guidance ? { opener: guidance.opener, maxChars: guidance.maxChars, rules: guidance.rules } : null,
         },
         ctx.signal,
       );
     }
 
     if (prev && req.replaceMessageId) {
-      await updatePayload(req.replaceMessageId, { result, stage, channel, recipientType, editedText: null, shownAt: Date.now(), error: null });
-      await db.contacts.update(prev.contactId, { stage: "drafted", channel, recipientType: result.recipient.recipientType });
+      await updatePayload(req.replaceMessageId, { result, stage, channel, recipientType, editedText: null, shownAt: Date.now(), error: null, guidance });
+      await db.contacts.update(prev.contactId, { stage: "drafted", channel, recipientType: result.recipient.recipientType, message: messageFeatures(result, stage, channel, variant) });
     } else {
       const now = Date.now();
-      const contact: Contact = {
+      const contact: Contact = newContact({
         id: uid(),
         applicationId: app?.id ?? null,
         createdAt: now,
         firstName: result.recipient.firstName,
         title: result.recipient.title,
+        company: app?.company ?? null,
         recipientType: result.recipient.recipientType,
         stage: "drafted",
         history: [{ stage: "drafted", at: now }],
         variant,
         channel,
-        demo: false,
-      };
+        demo: isDemo(),
+        source: "chat",
+        message: messageFeatures(result, stage, channel, variant),
+      });
       await db.contacts.put(contact);
       await addMessage({
         id: uid(),
@@ -290,6 +322,7 @@ export async function runDraft(req: DraftRequest, ctx: Ctx): Promise<void> {
           shownAt: now,
           copiedAt: null,
           error: null,
+          guidance,
         } satisfies DraftPayload,
       });
       if (!app) await say(ctx, "Tip: paste the job description in this chat too. Then the draft can say why you fit, using your strongest matching resume line.");
@@ -333,20 +366,17 @@ async function routeIntent(text: string, ctx: Ctx): Promise<void> {
 }
 
 export async function runStrategy(ctx: Ctx): Promise<void> {
-  const demo = typeof window !== "undefined" && localStorage.getItem("wi-demo") === "1";
+  const demo = isDemo();
   const apps = await db.applications.filter((a) => a.demo === demo).toArray();
   const profile = await getProfile();
+  if (!apps.length) {
+    await say(ctx, "There's nothing to learn from yet. Paste a job post to start, or turn on demo data in the sidebar to see what this looks like with a search history.");
+    return;
+  }
   ctx.setStatus({ label: "Reading your search history…" });
   try {
     const out = await post<StrategyPayload>("/api/ai/strategy", { applications: apps, resume: demo ? (await import("@/lib/demo")).DEMO_RESUME : profile.resume }, ctx.signal);
-    if (!out.facts.status.unlocked) {
-      await say(
-        ctx,
-        `Next-step advice unlocks after 10 applications with at least 3 outcomes, so the patterns are real. You have ${out.facts.status.applied} applied and ${out.facts.status.outcomes} with an outcome. Mark stages in the tracker as you hear back.`,
-      );
-      return;
-    }
-    await addMessage({ id: uid(), chatId: ctx.chatId, role: "assistant", kind: "strategy", payload: out });
+    await addMessage({ id: uid(), chatId: ctx.chatId, role: "assistant", kind: "strategy", payload: { ...out, progress: tierProgress(apps, Date.now()) } satisfies StrategyPayload });
   } finally {
     ctx.setStatus(null);
   }

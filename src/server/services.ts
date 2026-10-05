@@ -16,6 +16,7 @@ import {
   Draft,
   FitReport,
   JobMeta,
+  Opener,
   RecipientType,
   RequirementRating,
   SimilarCompany,
@@ -74,6 +75,15 @@ export const DraftInput = z.object({
   instruction: z.string().max(300).nullable().default(null),
   regeneratePart: AnatomyPart.nullable().default(null),
   current: Draft.nullable().default(null),
+  /** Learned from the user's own outcomes on the client (lib/learn.ts). Only shapes variant B. */
+  guidance: z
+    .object({
+      opener: Opener,
+      maxChars: z.number().int().min(80).max(600).nullable().default(null),
+      rules: z.array(z.string().max(300)).max(8).default([]),
+    })
+    .nullable()
+    .default(null),
 });
 
 export interface DraftResult {
@@ -126,7 +136,7 @@ export async function draftMessage(input: z.infer<typeof DraftInput>): Promise<D
       }
     }
   }
-  const draft = rulesDraft(ctx);
+  const draft = rulesDraft(input.guidance?.opener === "role_led" ? { ...ctx, shared: [] } : ctx);
   return { ...base, draft, issues: validateDraft(draft, src, limit).issues, source: "rules" };
 }
 
@@ -160,6 +170,7 @@ async function aiDraft(
     `Sender name for signoff: ${ctx.myName || "(not given; sign off with no name)"}. Recipient first name: ${ctx.recipientFirstName ?? "(unknown; use 'Hi there,')"}.`,
     shared.length ? `Detected shared ground (verified by code): ${shared.map((s) => `${s.label} [${s.kind}]`).join("; ")}.` : "Detected shared ground: none.",
     strong.length ? `Strongest verified fit evidence: ${strong.map((r) => `"${r.requirement}" ← "${r.resumeQuote}"`).join(" | ")}` : "No verified strong fit evidence; keep the background general and claim-free.",
+    guidanceText(input.guidance, shared),
     input.instruction ? `User instruction for this revision: ${input.instruction}` : "",
     input.regeneratePart && input.current ? `Rewrite ONLY the "${input.regeneratePart}" segment; copy all other segments exactly from this current draft: ${JSON.stringify(input.current)}` : "",
     feedback.length ? `Your previous draft failed these checks; fix them: ${feedback.map((f) => f.message).join(" ")}` : "",
@@ -170,6 +181,76 @@ async function aiDraft(
     .filter(Boolean)
     .join("\n\n");
   return callTool({ action: "draft_message", tool: "write_draft", description: "Return the outreach draft as structured segments with grounded claims.", schema: Draft, system, user, maxTokens: 1500 });
+}
+
+const OPENER_INSTRUCTION: Record<z.infer<typeof Opener>, string> = {
+  shared_school: "Open with the shared school.",
+  shared_employer: "Open with the shared employer.",
+  shared_field: "Open with the shared field of work.",
+  shared_other: "Open with the shared ground detected above.",
+  role_led: "Open with the role you applied for, not with shared ground.",
+  template: "",
+};
+
+/** The user's learned preferences, phrased as soft instructions. Grounding rules still win. */
+function guidanceText(g: z.infer<typeof DraftInput>["guidance"], shared: SharedGround[]): string {
+  if (!g) return "";
+  const lines: string[] = [];
+  const needsShared = g.opener !== "role_led" && g.opener !== "template";
+  if (!needsShared || shared.length) lines.push(OPENER_INSTRUCTION[g.opener]);
+  if (g.maxChars) lines.push(`Keep the whole message under ${g.maxChars} characters.`);
+  for (const r of g.rules) lines.push(`- ${r}`);
+  return lines.filter(Boolean).length
+    ? `Personal guidance learned from this sender's own outreach results (follow it unless it conflicts with the grounding rules):\n${lines.filter(Boolean).join("\n")}`
+    : "";
+}
+
+// ---- Playbook wording ----
+
+export const RewordInput = z.object({
+  rules: z
+    .array(z.object({ key: z.string().max(200), text: z.string().max(300), evidence: z.string().max(400) }))
+    .min(1)
+    .max(20),
+});
+
+/**
+ * Let the model turn computed rules into crisp heuristics. Each rewrite must
+ * keep the rule's meaning and may only use numbers present in its evidence;
+ * anything else falls back to the code-written text.
+ */
+export async function rewordRules(input: z.infer<typeof RewordInput>): Promise<{ key: string; text: string; source: "ai" | "rules" }[]> {
+  const rules = input.rules;
+  const fallback = rules.map((r) => ({ key: r.key, text: r.text, source: "rules" as const }));
+  if (!aiEnabled()) return fallback;
+  try {
+    const out = await callTool({
+      action: "reword_playbook",
+      tool: "write_rules",
+      description: "Rewrite each job-search rule as one short, specific, actionable heuristic.",
+      schema: z.object({ rules: z.array(z.object({ key: z.string(), text: z.string().max(220) })).max(20) }),
+      system: [
+        "You are a sharp career coach writing a personal playbook from a job seeker's own results.",
+        "Rewrite each rule as ONE imperative sentence (max 25 words) that says exactly what to do next time.",
+        "Keep the rule's meaning and scope (role family) exactly. Do not add advice the evidence doesn't support.",
+        "Numbers are optional; if you use any, they must appear in that rule's evidence. Never invent statistics, companies, or names.",
+        "No em dashes. Return every key you were given.",
+        DATA_RULE,
+      ].join("\n"),
+      user: asData("rules", JSON.stringify(rules)),
+      maxTokens: 1200,
+    });
+    const byKey = new Map(out.rules.map((r) => [r.key, r.text.trim()]));
+    return rules.map((r) => {
+      const t = byKey.get(r.key);
+      const ok = t && t.length >= 12 && !/—/.test(t) && numbersAreGrounded(t, { evidence: r.evidence, text: r.text });
+      if (t && !ok) log("info", "playbook.reword_rejected", { key: r.key });
+      return ok ? { key: r.key, text: t!, source: "ai" as const } : { key: r.key, text: r.text, source: "rules" as const };
+    });
+  } catch (e) {
+    log("warn", "playbook.fallback", { error: errorMessage(e) });
+    return fallback;
+  }
 }
 
 // ---- Strategy narrative ----
