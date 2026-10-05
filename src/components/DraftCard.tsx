@@ -7,6 +7,7 @@ import type { DraftPayload, DraftRequest } from "@/client/assistant";
 import { db, updatePayload } from "@/client/db";
 import { track } from "@/client/session";
 import { IconAlert, IconCheck, IconCopy, IconRefresh } from "./icons";
+import { Select } from "./ui";
 
 interface Props {
   messageId: string;
@@ -42,22 +43,28 @@ export function DraftCard({ messageId, p, busy, onRedraft }: Props) {
     void track("edited", Number(editRatio(rendered, text).toFixed(3)));
     await updatePayload(messageId, { copiedAt: Date.now() });
     const c = await db.contacts.get(p.contactId);
-    if (c && c.stage === "drafted") await db.contacts.update(c.id, { stage: "sent", history: [...c.history, { stage: "sent", at: Date.now() }] });
+    if (c) {
+      const now = Date.now();
+      const message = c.message ? { ...c.message, copiedAt: now, editRatio: Number(editRatio(rendered, text).toFixed(3)) } : c.message;
+      const sent = c.stage === "drafted" || c.stage === "not_contacted";
+      await db.contacts.update(c.id, { message, ...(sent ? { stage: "sent" as const, history: [...c.history, { stage: "sent", at: now }] } : {}) });
+    }
   }
 
   return (
     <article className="settle overflow-hidden rounded-2xl border border-line bg-surface" aria-label="Outreach draft">
-      <div className="flex flex-wrap items-end gap-x-4 gap-y-2 border-b border-line px-4 py-3">
-        <Picker
+      <div className="grid grid-cols-2 gap-2 border-b border-line px-3 py-3 sm:grid-cols-3 sm:gap-3 sm:px-4">
+        <Select
           label="Recipient"
           value={result.recipient.recipientType}
-          options={RECIPIENT_TYPES.map((v) => [v, RECIPIENT_LABELS[v]])}
-          hint={result.recipient.suggested ? `Suggested · ${result.recipient.reason}` : undefined}
+          options={RECIPIENT_TYPES.map((v) => [v, RECIPIENT_LABELS[v]] as const)}
+          badge={result.recipient.suggested ? <span className="hidden rounded bg-accent-soft px-1 text-[11px] text-ink-2 sm:inline" title={`Suggested · ${result.recipient.reason}`}>Suggested</span> : undefined}
+          title={result.recipient.suggested ? `Suggested · ${result.recipient.reason}` : undefined}
           disabled={busy}
           onChange={(v) => onRedraft({ recipientType: v as RecipientType })}
         />
-        <Picker label="Stage" value={p.stage} options={STAGES.map((v) => [v, STAGE_LABELS[v]])} disabled={busy} onChange={(v) => onRedraft({ stage: v as Stage })} />
-        <Picker label="Channel" value={p.channel} options={CHANNELS.map((v) => [v, CHANNEL_LABELS[v]])} disabled={busy} onChange={(v) => onRedraft({ channel: v as Channel })} />
+        <Select label="Stage" value={p.stage} options={STAGES.map((v) => [v, STAGE_LABELS[v]] as const)} disabled={busy} onChange={(v) => onRedraft({ stage: v as Stage })} />
+        <Select label="Channel" value={p.channel} options={CHANNELS.map((v) => [v, CHANNEL_LABELS[v]] as const)} disabled={busy} onChange={(v) => onRedraft({ channel: v as Channel })} className="col-span-2 sm:col-span-1" />
       </div>
 
       {result.shared.length > 0 ? (
@@ -72,6 +79,12 @@ export function DraftCard({ messageId, p, busy, onRedraft }: Props) {
         </div>
       ) : (
         <p className="px-4 pt-3 text-[13px] text-ink-3">No real shared ground found, so the note leads with the role.</p>
+      )}
+
+      {!isTemplate && p.guidance?.why && (
+        <p className="px-4 pt-2 text-[12.5px] text-ink-3">
+          <span className="font-medium text-ink-2">Learned from your outreach:</span> {p.guidance.why}
+        </p>
       )}
 
       <div className="relative px-4 pb-2 pt-3">
@@ -162,44 +175,6 @@ export function DraftCard({ messageId, p, busy, onRedraft }: Props) {
         {isTemplate ? "You're in the template group of a live A/B test: this version uses your own four-part template." : "You're in the AI-draft group of a live A/B test."} Copying logs the message as sent in your tracker.
       </p>
     </article>
-  );
-}
-
-function Picker({
-  label,
-  value,
-  options,
-  hint,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: [string, string][];
-  hint?: string;
-  disabled?: boolean;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <label className="flex flex-col gap-0.5 text-[12px] text-ink-3">
-      <span>
-        {label}
-        {hint && <span className="ml-1.5 rounded bg-accent-soft px-1 text-[11px] text-ink-2" title={hint}>Suggested</span>}
-      </span>
-      <select
-        className="rounded-lg border border-line bg-paper px-2.5 py-1.5 text-[14px] text-ink outline-none focus:border-accent disabled:opacity-60"
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-        title={hint}
-      >
-        {options.map(([v, l]) => (
-          <option key={v} value={v}>
-            {l}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }
 

@@ -6,14 +6,17 @@ import ReactMarkdown from "react-markdown";
 import type { DocKind } from "@/lib/schemas";
 import { buildDemoData } from "@/lib/demo";
 import { BACKGROUND, JOB, RECIPIENT, RESUME } from "@/lib/samples";
-import { UNLOCK_OUTREACH } from "@/lib/insights";
+import { tierProgress, TIER_LABEL, TIER_PATTERN, TIER_PERSONAL } from "@/lib/learn";
 import { db, type ChatMessage } from "@/client/db";
-import { handleInput, isPaste, reclassify, runDraft, runStrategy, type DraftPayload, type DraftRequest, type FitPayload, type PastePayload, type SimilarPayload, type Status, type StrategyPayload } from "@/client/assistant";
+import { handleInput, isPaste, reclassify, runDraft, runStrategy, type CraftPayload, type DraftPayload, type DraftRequest, type FitPayload, type PastePayload, type SimilarPayload, type Status, type StrategyPayload } from "@/client/assistant";
 import { prefs } from "@/client/session";
 import { uid } from "@/lib/text";
 import { DraftCard } from "./DraftCard";
+import { CraftCard } from "./CraftCard";
+import { Switch } from "./ui";
 import { FitCard, PasteBubble, ProfileNotice, SimilarCard, StrategyCard } from "./Cards";
-import { InsightsPanel, ProfilePanel, TrackerPanel } from "./Panels";
+import { InsightsPanel, ProfilePanel } from "./Panels";
+import { TrackerPanel } from "./Tracker";
 import { IconBoard, IconBriefcase, IconChart, IconCompass, IconDoc, IconMail, IconMenu, IconMoon, IconPlus, IconSend, IconStop, IconSun, IconUser, Mark } from "./icons";
 
 type Panel = "tracker" | "insights" | "profile" | null;
@@ -34,7 +37,10 @@ export default function WarmIntroApp() {
 
   const chats = useLiveQuery(() => db.chats.orderBy("updatedAt").reverse().toArray(), []) ?? [];
   const messages = useLiveQuery(() => (chatId ? db.messages.where("chatId").equals(chatId).sortBy("createdAt") : Promise.resolve([] as ChatMessage[])), [chatId]) ?? [];
-  const outreach = useLiveQuery(() => db.contacts.filter((c) => c.demo === demo && c.stage !== "drafted").count(), [demo]) ?? 0;
+  const myApps = useLiveQuery(() => db.applications.filter((a) => a.demo === demo).toArray(), [demo]) ?? [];
+  const [mountedAt] = useState(() => Date.now());
+  const learned = tierProgress(myApps, mountedAt);
+  const nextAt = learned.tier === "job_post" ? TIER_PERSONAL : learned.tier === "early" ? TIER_PATTERN : null;
   const profile = useLiveQuery(() => db.profile.get("me"));
 
   const busy = status !== null;
@@ -159,16 +165,16 @@ export default function WarmIntroApp() {
           <button type="button" onClick={() => setPanel("insights")} className="w-full rounded-lg px-2 py-1.5 text-left hover:bg-surface/60">
             <span className="flex items-center gap-2"><IconChart /> Insights</span>
             <span className="mt-1.5 block h-1 overflow-hidden rounded-full bg-grid" aria-hidden>
-              <span className="block h-full bg-accent" style={{ width: `${Math.min(1, outreach / UNLOCK_OUTREACH) * 100}%` }} />
+              <span className="block h-full bg-accent" style={{ width: `${nextAt ? Math.min(1, learned.resolved / nextAt) * 100 : 100}%` }} />
             </span>
-            <span className="text-[11.5px] text-ink-3">{outreach >= UNLOCK_OUTREACH ? "Unlocked" : `${outreach} of ${UNLOCK_OUTREACH} messages to unlock`}</span>
+            <span className="text-[11.5px] text-ink-3">
+              {TIER_LABEL[learned.tier]}
+              {nextAt ? ` · ${learned.resolved} of ${nextAt} outcomes` : ""}
+            </span>
           </button>
           <button type="button" onClick={() => setPanel("tracker")} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface/60"><IconBoard /> Tracker</button>
           <button type="button" onClick={() => setPanel("profile")} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface/60"><IconUser /> Profile</button>
-          <label className="flex items-center justify-between rounded-lg px-2 py-1.5 text-[13px] text-ink-2">
-            Demo data
-            <input type="checkbox" role="switch" checked={demo} onChange={() => void toggleDemo()} className="accent-[var(--accent)]" />
-          </label>
+          <Switch label="Demo data" checked={demo} onChange={() => void toggleDemo()} className="w-full rounded-lg px-2 py-1.5 text-[13px] text-ink-2 hover:bg-surface/60" />
           <div className="flex items-center gap-3 px-2 pt-1 text-[12.5px] text-ink-3">
             <Link href="/results" className="hover:text-ink">A/B results</Link>
             <Link href="/case" className="hover:text-ink">Case study</Link>
@@ -318,6 +324,8 @@ function MessageView({ m, busy, ...p }: { m: ChatMessage; busy: boolean } & Para
     switch (m.kind) {
       case "fit":
         return <FitCard p={m.payload as FitPayload} />;
+      case "craft":
+        return <CraftCard p={m.payload as CraftPayload} />;
       case "draft":
         return <DraftCard messageId={m.id} p={m.payload as DraftPayload} busy={busy} onRedraft={(r) => p.onRedraft(m.id, m.payload as DraftPayload, r)} />;
       case "strategy":
