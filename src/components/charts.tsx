@@ -13,7 +13,7 @@ export function pct(x: number, digits = 0): string {
 
 /** Horizontal bar for a rate with its 95% interval as a whisker. */
 export function RateRow({ r, label, color = "var(--series-b)" }: { r: Rate; label?: string; color?: string }) {
-  const tip = `${label ?? r.key}: ${pct(r.rate)} (${r.k} of ${r.n}), 95% interval ${pct(r.ci.low)}–${pct(r.ci.high)}`;
+  const tip = `${label ?? r.key}: ${pct(r.rate)} (${r.k} of ${r.n}), 95% interval ${pct(r.ci.low)}–${pct(r.ci.high)}${r.enough ? "" : ". Early signal: fewer than 5 data points"}`;
   return (
     <div className="grid grid-cols-[minmax(0,9rem)_1fr_auto] items-center gap-3 py-1.5" title={tip}>
       <span className="truncate text-[13px] text-ink-2">{label ?? r.key}</span>
@@ -25,8 +25,9 @@ export function RateRow({ r, label, color = "var(--series-b)" }: { r: Rate; labe
         <div className="absolute top-[1px] h-[10px] w-px bg-ink" style={{ left: `${r.ci.high * 100}%` }} />
       </div>
       <span className="w-[7.5rem] text-right text-[13px] tabular-nums text-ink">
-        {r.enough ? pct(r.rate) : <span className="text-ink-3">Too few to tell</span>}
+        {pct(r.rate)}
         <span className="ml-1 text-ink-3">{r.k}/{r.n}</span>
+        {!r.enough && <span className="ml-1 text-[11px] text-warn">early</span>}
       </span>
     </div>
   );
