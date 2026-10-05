@@ -8,6 +8,8 @@ import { db, updatePayload } from "@/client/db";
 import { track } from "@/client/session";
 import { IconAlert, IconCheck, IconCopy, IconRefresh } from "./icons";
 import { Select } from "./ui";
+import { WhatTheAISaw } from "./SkillCards";
+import { remember } from "@/client/memory";
 
 interface Props {
   messageId: string;
@@ -48,6 +50,7 @@ export function DraftCard({ messageId, p, busy, onRedraft }: Props) {
       const message = c.message ? { ...c.message, copiedAt: now, editRatio: Number(editRatio(rendered, text).toFixed(3)) } : c.message;
       const sent = c.stage === "drafted" || c.stage === "not_contacted";
       await db.contacts.update(c.id, { message, ...(sent ? { stage: "sent" as const, history: [...c.history, { stage: "sent", at: now }] } : {}) });
+      await remember({ demo: c.demo, kind: "message_sent", applicationId: c.applicationId, title: `Copied to send to ${c.firstName ?? "a contact"} (${c.recipientType})`, detail: text, refs: c.message?.ruleTrace.filter((x) => !x.startsWith("!")) ?? [] });
     }
   }
 
@@ -171,6 +174,7 @@ export function DraftCard({ messageId, p, busy, onRedraft }: Props) {
           </button>
         </div>
       </div>
+      {!isTemplate && <WhatTheAISaw m={result.context} />}
       <p className="border-t border-line bg-paper px-4 py-1.5 text-[11.5px] text-ink-3">
         {isTemplate ? "You're in the template group of a live A/B test: this version uses your own four-part template." : "You're in the AI-draft group of a live A/B test."} Copying logs the message as sent in your tracker.
       </p>
