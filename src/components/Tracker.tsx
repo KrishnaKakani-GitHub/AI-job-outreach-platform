@@ -10,6 +10,7 @@ import {
   APP_SOURCES,
   APP_STAGES,
   CONTACT_STAGES,
+  JOB_TYPES,
   OUTCOME_RESULTS,
   REASON_CATEGORIES,
   REASON_SOURCES,
@@ -19,6 +20,7 @@ import {
   type Application,
   type Contact,
   type ContactStage,
+  type JobType,
   type OutcomeLog,
   type RecipientType,
 } from "@/lib/schemas";
@@ -49,7 +51,11 @@ import {
 } from "@/lib/tracker";
 import { uid } from "@/lib/text";
 import { db, getProfile, importRecords } from "@/client/db";
-import { offerSimilarCompanies } from "@/client/assistant";
+import { afterStageChange, offerSimilarCompanies } from "@/client/assistant";
+import { refreshNoteRules } from "@/client/learning";
+import { familyOf, JOB_TYPE_LABEL, jobTypeOf } from "@/lib/insights";
+import { followedRefs } from "@/lib/memory";
+import { relearn, remember } from "@/client/memory";
 import { pct } from "./charts";
 import { PanelFrame } from "./Panels";
 import { Button, Dialog, fromDateInput, Select, shortDate, TextField, toDateInput } from "./ui";
@@ -161,7 +167,8 @@ export function TrackerPanel({ demo, chatId, onClose }: { demo: boolean; chatId:
             onEdit={setEditApp}
             onOutcome={setOutcomeFor}
             onStage={async (a, stage) => {
-              const next = moveApplication(a, stage, Date.now());
+              const moved = moveApplication(a, stage, Date.now());
+              const next = { ...moved, ...(await afterStageChange(a, moved, chatId)) };
               await db.applications.put(next);
               if (stage === "rejected") {
                 if (chatId) await offerSimilarCompanies(next, chatId);
@@ -426,6 +433,7 @@ function ApplicationDialog({ app, demo, onClose }: { app: Application | null; de
     nextStep: app?.nextStep ?? "",
     followUp: toDateInput(app?.followUpAt ?? null),
     notes: app?.notes ?? "",
+    jobType: (app?.jobType ?? "guess") as JobType | "guess",
   }));
   const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
@@ -448,8 +456,10 @@ function ApplicationDialog({ app, demo, onClose }: { app: Application | null; de
       followUpAt: fromDateInput(form.followUp),
       notes: form.notes.slice(0, 5000),
       appliedAt: appliedAt ?? base.appliedAt,
+      jobType: form.jobType === "guess" ? null : form.jobType,
     };
     next = moveApplication(next, form.stage, appliedAt ?? now);
+    next = { ...next, ...(await afterStageChange(base, next, null)) };
     const parsed = newApplication(next);
     await db.applications.put(parsed);
     onClose();
@@ -495,6 +505,12 @@ function ApplicationDialog({ app, demo, onClose }: { app: Application | null; de
         <TextField label="Company" value={form.company} onChange={(v) => set("company", v)} />
         <Select label="Stage" value={form.stage} options={APP_STAGES.map((s) => [s, APP_STAGE_LABEL[s]] as const)} onChange={(v) => set("stage", v as AppStage)} />
         <Select label="How it started" value={form.source} options={APP_SOURCES.map((s) => [s, SOURCE_LABEL[s]] as const)} onChange={(v) => set("source", v as AppSource)} />
+        <Select
+          label="Job type"
+          value={form.jobType}
+          options={[["guess", `Guess from title (${JOB_TYPE_LABEL[jobTypeOf(form.role)]})`] as const, ...JOB_TYPES.map((t) => [t, JOB_TYPE_LABEL[t]] as const)]}
+          onChange={(v) => set("jobType", v as JobType | "guess")}
+        />
         <TextField label="Applied on" type="date" value={form.applied} onChange={(v) => set("applied", v)} />
         <TextField label="Resume version" placeholder="e.g. v2" value={form.resumeVersion} onChange={(v) => set("resumeVersion", v)} />
         <TextField label="Job post URL" type="url" value={form.jobUrl} onChange={(v) => set("jobUrl", v)} />
@@ -520,6 +536,18 @@ function OutcomeDialog({ app, onClose }: { app: Application; onClose: () => void
   async function save() {
     const fresh = (await db.applications.get(app.id)) ?? app;
     await db.applications.put(applyOutcome(fresh, { ...o, at: Date.now() }, Date.now()));
+    await remember({
+      demo: fresh.demo,
+      kind: "outcome",
+      applicationId: fresh.id,
+      family: familyOf(fresh),
+      title: `Outcome: ${fresh.role}${fresh.company ? ` at ${fresh.company}` : ""}, ${o.result.replace("_", " ")}`,
+      detail: [o.notes && `What happened: ${o.notes}`, o.learning && `What I'd change: ${o.learning}`].filter(Boolean).join("\n"),
+      refs: [...followedRefs(fresh.trace), ...followedRefs(fresh.cv?.rules)],
+    });
+    // Notes can become proposed skill rules; the user still accepts or dismisses each.
+    if (o.notes.trim() || o.learning.trim()) void refreshNoteRules(fresh.demo).then(() => relearn(fresh.demo, "a logged outcome"));
+    else void relearn(fresh.demo, "a logged outcome");
     onClose();
   }
   return (
