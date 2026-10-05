@@ -5,10 +5,13 @@ import { useLiveQuery } from "dexie-react-hooks";
 import ReactMarkdown from "react-markdown";
 import type { DocKind } from "@/lib/schemas";
 import { buildDemoData } from "@/lib/demo";
+import { memoryFromRecords } from "@/lib/memory";
+import { familyOf } from "@/lib/insights";
+import { RULE_BY_ID } from "@/lib/skills/catalog";
 import { BACKGROUND, JOB, RECIPIENT, RESUME } from "@/lib/samples";
 import { tierProgress, TIER_LABEL, TIER_PATTERN, TIER_PERSONAL } from "@/lib/learn";
 import { db, type ChatMessage } from "@/client/db";
-import { handleInput, isPaste, reclassify, runDraft, runStrategy, type CraftPayload, type DraftPayload, type DraftRequest, type FitPayload, type PastePayload, type SimilarPayload, type Status, type StrategyPayload } from "@/client/assistant";
+import { handleInput, isPaste, reclassify, runDraft, runStrategy, runTailor, type CraftPayload, type DraftPayload, type DraftRequest, type FitPayload, type InterviewPayload, type PastePayload, type SimilarPayload, type Status, type StrategyPayload, type TailorPayload } from "@/client/assistant";
 import { prefs } from "@/client/session";
 import { uid } from "@/lib/text";
 import { DraftCard } from "./DraftCard";
@@ -17,9 +20,11 @@ import { Switch } from "./ui";
 import { FitCard, PasteBubble, ProfileNotice, SimilarCard, StrategyCard } from "./Cards";
 import { InsightsPanel, ProfilePanel } from "./Panels";
 import { TrackerPanel } from "./Tracker";
-import { IconBoard, IconBriefcase, IconChart, IconCompass, IconDoc, IconMail, IconMenu, IconMoon, IconPlus, IconSend, IconStop, IconSun, IconUser, Mark } from "./icons";
+import { SkillsPanel } from "./SkillsPanel";
+import { InterviewCard, TailorCard } from "./SkillCards";
+import { IconBoard, IconBriefcase, IconChart, IconCompass, IconDoc, IconMail, IconMenu, IconMoon, IconPlus, IconSend, IconSpark, IconStop, IconSun, IconUser, Mark } from "./icons";
 
-type Panel = "tracker" | "insights" | "profile" | null;
+type Panel = "tracker" | "insights" | "profile" | "skills" | null;
 
 export default function WarmIntroApp() {
   const [chatId, setChatId] = useState<string | null>(null);
@@ -87,9 +92,11 @@ export default function WarmIntroApp() {
       const { applications, contacts } = buildDemoData();
       await db.applications.bulkPut(applications);
       await db.contacts.bulkPut(contacts);
+      await db.memory.bulkPut(memoryFromRecords(applications, familyOf, (id) => RULE_BY_ID.get(id)?.text ?? id));
     } else {
       await db.applications.filter((a) => a.demo).delete();
       await db.contacts.filter((c) => c.demo).delete();
+      await db.memory.filter((m) => m.demo).delete();
     }
   }
 
@@ -173,6 +180,7 @@ export default function WarmIntroApp() {
             </span>
           </button>
           <button type="button" onClick={() => setPanel("tracker")} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface/60"><IconBoard /> Tracker</button>
+          <button type="button" onClick={() => setPanel("skills")} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface/60"><IconSpark /> Skills</button>
           <button type="button" onClick={() => setPanel("profile")} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface/60"><IconUser /> Profile</button>
           <Switch label="Demo data" checked={demo} onChange={() => void toggleDemo()} className="w-full rounded-lg px-2 py-1.5 text-[13px] text-ink-2 hover:bg-surface/60" />
           <div className="flex items-center gap-3 px-2 pt-1 text-[12.5px] text-ink-3">
@@ -214,6 +222,7 @@ export default function WarmIntroApp() {
           onRedraft={(id, p, r) => run((ctx) => runDraft({ ...r, recipientText: p.recipientText, replaceMessageId: id }, ctx))}
           onStrategy={() => run((ctx) => runStrategy(ctx))}
           onOpenProfile={() => setPanel("profile")}
+          onTailor={(appId) => run((ctx) => runTailor(ctx, appId))}
         />
 
         <Composer ref={composerRef} busy={busy} onSend={send} onStop={() => abortRef.current?.abort()} />
@@ -222,6 +231,7 @@ export default function WarmIntroApp() {
       {panel === "tracker" && <TrackerPanel demo={demo} chatId={chatId} onClose={() => setPanel(null)} />}
       {panel === "insights" && <InsightsPanel demo={demo} onClose={() => setPanel(null)} />}
       {panel === "profile" && <ProfilePanel onClose={() => setPanel(null)} />}
+      {panel === "skills" && <SkillsPanel demo={demo} onClose={() => setPanel(null)} />}
     </div>
   );
 }
@@ -238,6 +248,7 @@ function Thread(props: {
   onRedraft: (id: string, p: DraftPayload, r: Omit<DraftRequest, "recipientText" | "replaceMessageId">) => void;
   onStrategy: () => void;
   onOpenProfile: () => void;
+  onTailor: (applicationId: string) => void;
 }) {
   const { messages, status, busy, error } = props;
   const scroller = useRef<HTMLDivElement>(null);
@@ -325,13 +336,17 @@ function MessageView({ m, busy, ...p }: { m: ChatMessage; busy: boolean } & Para
       case "fit":
         return <FitCard p={m.payload as FitPayload} />;
       case "craft":
-        return <CraftCard p={m.payload as CraftPayload} />;
+        return <CraftCard p={m.payload as CraftPayload} busy={busy} onTailor={() => p.onTailor((m.payload as CraftPayload).applicationId)} />;
       case "draft":
         return <DraftCard messageId={m.id} p={m.payload as DraftPayload} busy={busy} onRedraft={(r) => p.onRedraft(m.id, m.payload as DraftPayload, r)} />;
       case "strategy":
         return <StrategyCard p={m.payload as StrategyPayload} />;
       case "similar":
         return <SimilarCard messageId={m.id} p={m.payload as SimilarPayload} />;
+      case "tailor":
+        return <TailorCard messageId={m.id} p={m.payload as TailorPayload} />;
+      case "interview":
+        return <InterviewCard p={m.payload as InterviewPayload} />;
       case "profile":
         return <ProfileNotice what={(m.payload as { what: "resume" | "background" }).what} onOpenProfile={p.onOpenProfile} />;
       default:
