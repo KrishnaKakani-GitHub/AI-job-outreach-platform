@@ -6,7 +6,26 @@ Paste three things: your resume (once), a job post, and the LinkedIn profile of 
 
 - **A fit check.** Each requirement is rated strong, partial or missing, and quotes the resume line that proves it. The score is computed in code.
 - **A grounded outreach draft.** It is stage-aware (invite note, accepted follow-up, referral ask), recipient-aware (alum, recruiter, HR, hiring manager, team member) and channel-aware (LinkedIn, email, platform message). Every personalized phrase shows its source on hover.
-- **A tracker, Insights and next steps.** After enough history the app shows conversion and rejection patterns with confidence intervals, a pre-apply checklist built from your recurring gaps, resume tweaks that never invent facts, and similar companies after a final-round rejection.
+- **A tracker.** Applications and contacts with stages, sources (cold, referral, recruiter), dates, next steps and overdue follow-ups; search and filters; an outcome log that keeps employer-stated rejection reasons separate from guesses; a network view with LinkedIn `Connections.csv` import; and JSON/CSV backup and restore.
+- **A learning loop.** The app compares the applications that got a response with the ones that didn't, and the outreach that got accepted with the outreach that didn't, then feeds what it finds back into the next application:
+  - a **"Craft this application"** card for every job you paste (resume version, gap to fix first, who to message, how to open, words to borrow), each with its reason and the past applications it's based on;
+  - a **personal playbook** of rules learned from your outcomes, reworded by the AI, number-checked by code, and used only after you accept them;
+  - **Thompson sampling** over message openings, so drafts mostly use what works for you but still test alternatives.
+- **Insights and next steps** with confidence intervals, a pre-apply checklist from recurring gaps, resume tweaks that never invent facts, and similar companies after a final-round rejection.
+
+### Evidence tiers instead of unlock gates
+
+Suggestions are never hidden behind a threshold; they carry a label that upgrades as data grows.
+
+| Data | What the app does | Label |
+|---|---|---|
+| 0–4 outcomes | Suggestions from the job post and your resume only | Based on this job post |
+| 5 outcomes, ≥1 success and ≥1 failure | Personal suggestions start, comparing successes with failures | Early signal |
+| 5 sent messages, ≥1 accepted | Message-style suggestions start | Early signal |
+| 15 outcomes | Comparisons within a role family become meaningful | Pattern |
+| 30 outcomes per comparison group | Differences this large are unlikely to be luck | Strong pattern |
+
+A success is any response (a reply, an interview or better). A failure is a rejection without a response, or no response 21 days after applying.
 
 Every drafting session is randomly assigned to **A: your own four-part template** or **B: the AI draft**. Results are public at `/results`.
 
@@ -58,8 +77,8 @@ npm run dev                  # http://localhost:3000
 
 | Command | What it does |
 |---|---|
-| `npm test` | 52 unit tests: statistics, classifier, fit scoring, shared ground, drafting, validators, strategy, and the AI services (mocked model) |
-| `npm run test:e2e` | Playwright on a production build: both A/B arms, event logging, tracker, public pages |
+| `npm test` | 96 unit tests: statistics, classifier, fit scoring, shared ground, drafting, validators, tracker, CSV and backups, the learning loop and playbook, and the AI services (mocked model) |
+| `npm run test:e2e` | Playwright on a production build: both A/B arms, event logging, tracker, outcome logging, export, the learning card, the playbook, and accessibility (axe) |
 | `npm run typecheck && npm run lint` | Static checks |
 
 ## Continuous integration
@@ -81,5 +100,9 @@ No lockfile is committed yet, so CI uses `npm install`. Every dependency in `pac
 - LinkedIn invite-note limits (200 characters free, 300 Premium) come from 2026 third-party guides. LinkedIn does not publish them.
 - Similar-company suggestions come from the model's knowledge. Users are told to verify that each company is hiring.
 - Rejection "reasons" are presented as likely patterns, never as the employer's actual decision.
+
+## Acknowledgments
+
+Tracker, outcome logging, network, and Insights features adapted from Sanjana Gowda's AI Job Tracker and Rejection Analyzer ([github.com/sanjana1311/job-tracker](https://github.com/sanjana1311/job-tracker)). The implementation here is original; no code was copied.
 
 See `BUILD_LOG.md` for how this was built and `PLAYBOOK.md` to reuse the experiment setup.

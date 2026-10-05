@@ -26,6 +26,16 @@ This was a two-day build with an AI coding agent, which planned, wrote and teste
   - a misleading rejection-rate denominator
   - future-dated demo data
 
+## v1.1: from tracker to learning loop
+
+- **Tracker parity.** Outcome logging, manual entry, sources, follow-ups, search and filters, a network view, LinkedIn import and backups, adapted from Sanjana Gowda's job-tracker idea and rebuilt in typed React. Every record passes a Zod schema on write and on import, and v1 records are upgraded in place (IndexedDB v2 migration).
+- **Outcomes defined first.** A success is any response; a failure is a rejection without one or 21 days of silence. Message success is acceptance or better; failure is 14 days of silence.
+- **No unlock gates.** Instead of hiding Insights until 10 messages, every suggestion carries an evidence tier (job post → early signal at 5 outcomes with both a success and a failure → pattern at 15 → strong at 30 per group).
+- **Personal suggestions.** Similar past applications (role family, seniority, requirement overlap) are compared on resume version, gaps, networking before applying, recipient type and opening; each suggestion cites its counts and the applications behind it.
+- **Playbook.** Code finds contrasts, the model rewords them, a validator rejects any number not in the evidence, and the user accepts or dismisses each rule. Accepted rules feed drafts and the craft card; rules the data stops supporting are paused automatically.
+- **Bandit.** Openings are chosen by seeded Thompson sampling over Beta posteriors, so early luck can't lock in a style. It only shapes variant B, so the A/B test stays clean.
+- **Checked by:** 44 new unit tests (outcomes, tiers, contrasts, bandit, playbook sync, CSV edge cases including formula injection, backup validation) and 4 new end-to-end tests including an axe scan of the tracker and Insights.
+
 ## What was automated
 
 - Scaffolding, typed schemas and test suites
