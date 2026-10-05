@@ -8,10 +8,24 @@ import Dexie, { type EntityTable } from "dexie";
 import type { Application, Contact, Profile } from "@/lib/schemas";
 import { upgradeApplication, upgradeContact } from "@/lib/records";
 import type { PlaybookRule } from "@/lib/playbook";
+import type { SkillId } from "@/lib/skills/catalog";
+import type { MemoryEntry } from "@/lib/memory";
 
 export type PlaybookRecord = PlaybookRule & { id: string; demo: boolean };
 
-export type MessageKind = "text" | "paste" | "fit" | "craft" | "draft" | "strategy" | "similar" | "profile" | "notice";
+/** One personal version of one skill: what was learned at that point, and what changed from the last. */
+export interface SkillVersionRecord {
+  id: string;
+  demo: boolean;
+  skillId: SkillId;
+  version: number;
+  signature: string;
+  items: string[];
+  changes: string[];
+  createdAt: number;
+}
+
+export type MessageKind = "text" | "paste" | "fit" | "craft" | "draft" | "strategy" | "similar" | "profile" | "notice" | "tailor" | "interview";
 
 export interface ChatMessage {
   id: string;
@@ -40,6 +54,8 @@ class WarmIntroDB extends Dexie {
   chats!: EntityTable<Chat, "id">;
   messages!: EntityTable<ChatMessage, "id">;
   playbook!: EntityTable<PlaybookRecord, "id">;
+  skillVersions!: EntityTable<SkillVersionRecord, "id">;
+  memory!: EntityTable<MemoryEntry, "id">;
 
   constructor() {
     super("warm-intro");
@@ -77,6 +93,38 @@ class WarmIntroDB extends Dexie {
       chats: "id, updatedAt, applicationId",
       messages: "id, chatId, createdAt",
       playbook: "id, status",
+    });
+    // v4: job types, frozen resumes and rule traces on applications; personal skill versions.
+    this.version(4)
+      .stores({
+        profile: "id",
+        applications: "id, createdAt, stage",
+        contacts: "id, applicationId, createdAt, stage",
+        chats: "id, updatedAt, applicationId",
+        messages: "id, chatId, createdAt",
+        playbook: "id, status",
+        skillVersions: "id, skillId, demo",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("applications").toCollection().modify((a: Record<string, unknown>) => {
+          const up = upgradeApplication(a);
+          if (up) Object.assign(a, up);
+        });
+        await tx.table("contacts").toCollection().modify((c: Record<string, unknown>) => {
+          const up = upgradeContact(c);
+          if (up) Object.assign(c, up);
+        });
+      });
+    // v5: the memory log.
+    this.version(5).stores({
+      profile: "id",
+      applications: "id, createdAt, stage",
+      contacts: "id, applicationId, createdAt, stage",
+      chats: "id, updatedAt, applicationId",
+      messages: "id, chatId, createdAt",
+      playbook: "id, status",
+      skillVersions: "id, skillId, demo",
+      memory: "id, at, kind, applicationId",
     });
   }
 }
@@ -124,5 +172,5 @@ export async function importRecords(apps: Application[], contacts: Contact[], pr
 
 /** Wipe everything (used by "Delete my data" in the profile panel). */
 export async function clearAll(): Promise<void> {
-  await Promise.all([db.profile.clear(), db.applications.clear(), db.contacts.clear(), db.chats.clear(), db.messages.clear(), db.playbook.clear()]);
+  await Promise.all([db.profile.clear(), db.applications.clear(), db.contacts.clear(), db.chats.clear(), db.messages.clear(), db.playbook.clear(), db.skillVersions.clear(), db.memory.clear()]);
 }

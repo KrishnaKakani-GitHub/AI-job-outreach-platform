@@ -2,9 +2,13 @@
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import type { Application, GapTag, Profile } from "@/lib/schemas";
-import { computeInsights, rate, roleFamily } from "@/lib/insights";
+import { computeInsights, familyOf, rate } from "@/lib/insights";
 import { groupBy, jdPatterns, messageStats, outreachChains, resolvedApps, tierProgress, TIER_PATTERN, TIER_PERSONAL } from "@/lib/learn";
 import { stallPoints } from "@/lib/strategy";
+import { jobTypeProfiles, overallRate, ruleRecos, SIGNAL_TEXT, targetingSignal, type JobTypeProfile } from "@/lib/jobtypes";
+import { scoreAll, type RuleScore } from "@/lib/skills/score";
+import { learnedTargets } from "@/lib/skills/personal";
+import { RULE_BY_ID } from "@/lib/skills/catalog";
 import { RECIPIENT_LABELS } from "@/lib/draft";
 import { refreshPlaybook, setRuleStatus } from "@/client/learning";
 import { Button, EvidenceBadge } from "./ui";
@@ -71,11 +75,14 @@ export function InsightsPanel({ demo, onClose }: { demo: boolean; onClose: () =>
   const chains = outreachChains(apps, contacts, now);
   const patterns = jdPatterns(resolved);
   const stalls = stallPoints(apps);
-  const famVersion = groupBy(resolved, (r) => `${roleFamily(r.app.role)}|${r.app.resumeVersion}`);
+  const famVersion = groupBy(resolved, (r) => `${familyOf(r.app)}|${r.app.resumeVersion}`);
   const reasons = apps.filter((a) => a.outcome && a.outcome.reasonCategory !== "none_given");
   const stated = reasons.filter((a) => isStatedReason(a.outcome!.reasonSource));
   const guessed = reasons.filter((a) => !isStatedReason(a.outcome!.reasonSource));
   const next = progress.tier === "job_post" ? TIER_PERSONAL : progress.tier === "early" ? TIER_PATTERN : null;
+  const profiles = jobTypeProfiles(apps, now);
+  const overall = overallRate(apps, now);
+  const scores = scoreAll(apps, contacts, now, learnedTargets(rules));
   const visibleRules = rules.filter((r) => r.status !== "rejected" && r.current).sort((x, y) => (x.status === y.status ? 0 : x.status === "accepted" ? -1 : 1));
 
   return (
@@ -100,6 +107,20 @@ export function InsightsPanel({ demo, onClose }: { demo: boolean; onClose: () =>
           <Tile label="Application to interview" value={pct(ins.interviewConversion.rate)} sub={`${ins.interviewConversion.k} of ${ins.interviewConversion.n} applications`} />
           <Tile label="Average alignment" value={ins.avgAlignment === null ? "None yet" : String(ins.avgAlignment)} sub="fit score out of 100" />
         </div>
+
+        <Block title="By job type" note="What each kind of role asks for, and what went with a response for you. Small job types lean on your overall rate until they have data of their own.">
+          {profiles.length ? (
+            <ul className="space-y-3">
+              {profiles.map((p) => <JobTypeRow key={p.family} p={p} overall={overall} scores={scores} />)}
+            </ul>
+          ) : (
+            <Empty>Patterns per job type appear once applications have outcomes.</Empty>
+          )}
+        </Block>
+
+        <Block title="What was on your resume when you got interviews" note="For each interview, the insights the resume you sent followed. Across many interviews, this is what to keep building on.">
+          <InterviewInsights apps={apps} rules={rules} scores={scores} />
+        </Block>
 
         <Block title="Your playbook" note="Rules learned from your own outcomes. Accepted rules shape every suggestion and AI draft.">
           {visibleRules.length === 0 ? (
@@ -234,6 +255,91 @@ export function InsightsPanel({ demo, onClose }: { demo: boolean; onClose: () =>
         </Block>
       </div>
     </PanelFrame>
+  );
+}
+
+function InterviewInsights({ apps, rules, scores }: { apps: Application[]; rules: { key: string; text: string }[]; scores: RuleScore[] }) {
+  const text = (id: string) => (id.startsWith("learned/") ? (rules.find((r) => `learned/${r.key}` === id)?.text ?? id.slice(8)) : (RULE_BY_ID.get(id)?.text ?? id));
+  const interviews = apps.filter((a) => a.history.some((h) => h.stage === "interview") || ["interview", "final_round", "offer"].includes(a.stage));
+  const top = scores.filter((s) => s.metric === "interview" && s.family === null && s.status === "working").sort((a, b) => b.lift - a.lift).slice(0, 3);
+  if (!interviews.length) return <Empty>Once an application reaches an interview, the insights its resume followed show up here.</Empty>;
+  return (
+    <div className="space-y-3 text-[13px]">
+      {top.length > 0 && (
+        <ul className="space-y-1 rounded-lg bg-accent-soft/40 p-2.5">
+          {top.map((s) => (
+            <li key={s.id}>
+              <span className="font-medium">{text(s.id)}</span> <span className="text-ink-2">Followed: {s.with.s} of {s.with.n} got an interview; not followed: {s.without.s} of {s.without.n}.</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <ul className="space-y-2">
+        {interviews.slice(-6).reverse().map((a) => {
+          const ids = [...new Set([...(a.cv?.rules ?? []), ...(a.trace ?? [])].filter((x) => !x.startsWith("!")))];
+          return (
+            <li key={a.id}>
+              <p className="font-medium">{a.role}{a.company ? ` · ${a.company}` : ""} <span className="font-normal text-ink-3">{familyOf(a)}{a.cv?.tailored ? " · tailored resume" : ""}</span></p>
+              {ids.length ? <p className="text-ink-2">{ids.slice(0, 4).map(text).join(" · ")}{ids.length > 4 ? ` · and ${ids.length - 4} more` : ""}</p> : <p className="text-ink-3">The resume for this one wasn&apos;t recorded.</p>}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function JobTypeRow({ p, overall, scores }: { p: JobTypeProfile; overall: number; scores: RuleScore[] }) {
+  const signal = targetingSignal(p, overall);
+  const works = ruleRecos(scores, p.family);
+  return (
+    <li className="rounded-lg border border-line p-3 text-[13px]">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[14.5px] font-medium">{p.family}</span>
+        <EvidenceBadge tier={p.tier} />
+        <span className={`rounded-full px-2 py-0.5 text-[11.5px] ${signal === "apply_more" ? "bg-accent-soft text-ink" : signal === "apply_less" ? "bg-warn-soft text-warn" : "bg-sunk text-ink-3"}`} title={`Compared with ${pct(overall)} across all your applications`}>
+          {SIGNAL_TEXT[signal]}
+        </span>
+        <span className="ml-auto tabular-nums text-ink-2">
+          {p.s} of {p.n} got a response
+          <span className="text-ink-3"> · range {pct(p.ci.low)} to {pct(p.ci.high)}</span>
+        </span>
+      </div>
+      {p.commonAsks.length > 0 && (
+        <p className="mt-1.5 text-ink-2">
+          <span className="text-ink-3">Usually asks for: </span>
+          {p.commonAsks.slice(0, 6).map((a) => a.term).join(", ")}
+        </p>
+      )}
+      {p.coverage.length > 0 && (
+        <ul className="mt-1.5 space-y-0.5">
+          {p.coverage.slice(0, 3).map((c) => (
+            <li key={c.term}>
+              When the post asked for “{c.term}” and your resume showed it: <span className="tabular-nums font-medium">{c.covered.s} of {c.covered.n}</span>; when it didn&apos;t: <span className="tabular-nums">{c.uncovered.s} of {c.uncovered.n}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {works.length > 0 && (
+        <ul className="mt-1.5 space-y-0.5">
+          {works.map((w) => (
+            <li key={w.id}>
+              <span className="text-ink-3">{w.title.split(": ")[1] === "what went with interviews" ? "Went with interviews: " : "Works for you here: "}</span>
+              {w.advice} <span className="text-ink-3">({w.why.replace(/^[^:]+: /, "")})</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {p.posts.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-ink-2">
+          {p.posts.map((f) => (
+            <li key={f.feature}>
+              {f.feature}: “{f.best.level}” {f.best.s} of {f.best.n}; other posts {f.rest.s} of {f.rest.n}
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }
 

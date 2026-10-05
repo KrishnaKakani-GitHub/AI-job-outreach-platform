@@ -5,7 +5,7 @@
  */
 import type { Application, GapTag } from "./schemas";
 import { CHECKLIST_QUESTIONS, GAP_LABELS } from "./fit";
-import { furthestStage, isApplied, reached, roleFamily, rate, type Rate } from "./insights";
+import { furthestStage, isApplied, reached, familyOf, rate, type Rate } from "./insights";
 import { hasNumber, isBullet, keywords, lines, stripBullet } from "./text";
 
 /** Counts shown on the next-steps card. There is no gate: advice is labeled by evidence tier instead. */
@@ -52,7 +52,7 @@ export interface Target {
 export function nextTargets(apps: Application[], limit = 3): Target[] {
   const groups = new Map<string, Application[]>();
   for (const a of apps.filter(isApplied)) {
-    const key = `${roleFamily(a.role)}|${a.seniority}`;
+    const key = `${familyOf(a)}|${a.seniority}`;
     groups.set(key, [...(groups.get(key) ?? []), a]);
   }
   const out: Target[] = [];

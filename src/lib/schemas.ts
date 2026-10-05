@@ -185,6 +185,33 @@ export type Profile = z.infer<typeof Profile>;
 
 export const StageEvent = z.object({ stage: z.string(), at: z.number() });
 
+/** Job types the learning loop compares. The app guesses one from the title; the user can override it. */
+export const JOB_TYPES = [
+  "data_analytics",
+  "analytics_engineering",
+  "data_engineering",
+  "product",
+  "data_science_ml",
+  "growth",
+  "ai_engineering",
+  "software_engineering",
+  "other",
+] as const;
+export const JobType = z.enum(JOB_TYPES);
+export type JobType = z.infer<typeof JobType>;
+
+/** The resume that actually went out with an application, frozen when it was applied for or tailored. */
+export const CvSnapshot = z.object({
+  text: z.string().max(40000),
+  /** Master resume version it was built from. */
+  base: z.string().max(40),
+  tailored: z.boolean(),
+  /** Skill rule ids the tailoring applied (baseline or learned). */
+  rules: z.array(z.string().max(200)).max(80).default([]),
+  at: z.number(),
+});
+export type CvSnapshot = z.infer<typeof CvSnapshot>;
+
 export const Application = z.object({
   id: z.string().min(1).max(80),
   createdAt: z.number(),
@@ -208,6 +235,13 @@ export const Application = z.object({
   outcome: OutcomeLog.nullable().default(null),
   /** Gap fixes the user says they applied to the resume for this application. */
   tweaks: z.array(GapTag).default([]),
+  /** User override of the guessed job type; null = use the guess. */
+  jobType: JobType.nullable().default(null),
+  cv: CvSnapshot.nullable().default(null),
+  /** Skill rule ids the sent resume satisfied, computed when it was frozen. Null = unknown. */
+  trace: z.array(z.string().max(200)).max(120).nullable().default(null),
+  /** When an interview prep card was made for this application. */
+  prepAt: z.number().nullable().default(null),
 });
 export type Application = z.infer<typeof Application>;
 
@@ -223,6 +257,10 @@ export const MessageFeatures = z.object({
   chars: z.number().int().min(0),
   editRatio: z.number().min(0).max(1).nullable().default(null),
   copiedAt: z.number().nullable().default(null),
+  /** Message-skill rule ids this message satisfied. */
+  ruleTrace: z.array(z.string().max(200)).max(40).default([]),
+  /** The resume line the message led with, if it cited one. */
+  leadQuote: z.string().max(400).nullable().default(null),
 });
 export type MessageFeatures = z.infer<typeof MessageFeatures>;
 

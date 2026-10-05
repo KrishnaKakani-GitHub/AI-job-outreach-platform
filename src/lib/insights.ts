@@ -2,7 +2,7 @@
  * Insights dashboard metrics. Every rate carries its count and a Wilson
  * interval, and small groups are marked so nobody over-reads five data points.
  */
-import type { AppStage, Application, Contact, GapTag } from "./schemas";
+import type { AppStage, Application, Contact, GapTag, JobType } from "./schemas";
 import { MIN_GROUP_N, wilson, type Interval } from "./stats";
 
 export interface Rate {
@@ -38,16 +38,45 @@ export function isApplied(a: Pick<Application, "stage" | "history">): boolean {
   return a.stage !== "saved" || a.history.some((h) => h.stage !== "saved");
 }
 
-export function roleFamily(role: string): string {
+export const JOB_TYPE_LABEL: Record<JobType, string> = {
+  data_analytics: "Data analytics",
+  analytics_engineering: "Analytics engineering",
+  data_engineering: "Data engineering",
+  product: "Product",
+  data_science_ml: "Data science / ML",
+  growth: "Growth",
+  ai_engineering: "AI engineering",
+  software_engineering: "Software engineering",
+  other: "Other",
+};
+
+/** Best guess of the job type from a title. Order matters: "analytics engineer" before "analyst". */
+export function jobTypeOf(role: string): JobType {
   const r = role.toLowerCase();
-  if (/product manager|\bpm\b|product owner|\bapm\b|accelerator/.test(r)) return "Product";
-  if (/data scien|machine learning|\bml\b/.test(r)) return "Data science / ML";
-  if (/analytics engineer|data engineer|etl/.test(r)) return "Data engineering";
-  if (/analyst/.test(r)) return "Analyst";
-  if (/growth/.test(r)) return "Growth";
-  if (/\bai\b|agent|llm/.test(r)) return "AI engineering";
-  if (/engineer|developer|swe/.test(r)) return "Software engineering";
-  return "Other";
+  if (/product manager|\bpm\b|product owner|\bapm\b|accelerator|product analyst/.test(r)) return "product";
+  if (/analytics engineer|bi engineer/.test(r)) return "analytics_engineering";
+  if (/data engineer|etl|data platform/.test(r)) return "data_engineering";
+  if (/data scien|machine learning|\bml\b/.test(r)) return "data_science_ml";
+  if (/analyst|analytics|business intelligence|\bbi\b/.test(r)) return "data_analytics";
+  if (/growth/.test(r)) return "growth";
+  if (/\bai\b|agent|llm/.test(r)) return "ai_engineering";
+  if (/engineer|developer|swe/.test(r)) return "software_engineering";
+  return "other";
+}
+
+/** Display label for a job title's guessed type. */
+export function roleFamily(role: string): string {
+  return JOB_TYPE_LABEL[jobTypeOf(role)];
+}
+
+/** The job type an application counts under: the user's override, else the guess. */
+export function jobTypeOfApp(a: { role: string; jobType?: JobType | null }): JobType {
+  return a.jobType ?? jobTypeOf(a.role);
+}
+
+/** Display label of the job type an application counts under. */
+export function familyOf(a: { role: string; jobType?: JobType | null }): string {
+  return JOB_TYPE_LABEL[jobTypeOfApp(a)];
 }
 
 function groupRates<T>(items: T[], keyOf: (t: T) => string, hit: (t: T) => boolean): Rate[] {
@@ -100,14 +129,14 @@ export function computeInsights(apps: Application[], contacts: Contact[]): Insig
     trend.set(w, t);
   }
   const fam = new Map<string, Application[]>();
-  for (const a of applied) fam.set(roleFamily(a.role), [...(fam.get(roleFamily(a.role)) ?? []), a]);
+  for (const a of applied) fam.set(familyOf(a), [...(fam.get(familyOf(a)) ?? []), a]);
 
   return {
     outreachCount,
     applied: applied.length,
     interviewConversion: rate("All applications", applied.filter((a) => reached(a, "interview")).length, applied.length),
     // Denominator is every applied role; still-open applications count as not rejected (yet).
-    rejectionByRole: groupRates(applied, (a) => roleFamily(a.role), (a) => a.stage === "rejected"),
+    rejectionByRole: groupRates(applied, (a) => familyOf(a), (a) => a.stage === "rejected"),
     rejectionBySeniority: groupRates(applied, (a) => a.seniority, (a) => a.stage === "rejected"),
     topGaps: [...gapCounts.entries()].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count).slice(0, 5),
     avgAlignment: fits.length ? Math.round(fits.reduce((s, x) => s + x, 0) / fits.length) : null,

@@ -8,11 +8,13 @@ import { useLiveQuery } from "dexie-react-hooks";
 import type { CraftPayload } from "@/client/assistant";
 import { db } from "@/client/db";
 import type { Reco } from "@/lib/learn";
-import { EvidenceBadge } from "./ui";
+import { localManifest } from "@/lib/skills/personal";
+import { Button, EvidenceBadge } from "./ui";
+import { WhatTheAISaw } from "./SkillCards";
 
-const ORDER: Reco["kind"][] = ["rule", "resume", "gap", "lead", "network", "recipient", "opener", "family", "language"];
+const ORDER: Reco["kind"][] = ["rule", "jobtype", "resume", "gap", "lead", "network", "recipient", "opener", "family", "language"];
 
-export function CraftCard({ p }: { p: CraftPayload }) {
+export function CraftCard({ p, busy = false, onTailor }: { p: CraftPayload; busy?: boolean; onTailor?: () => void }) {
   const { craft } = p;
   const app = useLiveQuery(() => db.applications.get(p.applicationId), [p.applicationId]);
   const recos = [...craft.recos].sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
@@ -73,6 +75,13 @@ export function CraftCard({ p }: { p: CraftPayload }) {
           </li>
         ))}
       </ul>
+      {p.context && <WhatTheAISaw m={localManifest("craft", "craft", p.context)} computed />}
+      {onTailor && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-2.5">
+          <span className="mr-auto text-[12.5px] text-ink-2">Apply these with your skills, using only lines already in your resume.</span>
+          <Button variant="primary" disabled={busy} onClick={onTailor}>Tailor my resume for this job</Button>
+        </div>
+      )}
       <p className="border-t border-line px-4 py-2 text-[11.5px] text-ink-3">
         Patterns from your own history, not guarantees. Every number is computed from your tracker; nothing here leaves your browser.
       </p>

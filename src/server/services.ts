@@ -25,6 +25,13 @@ import {
 } from "@/lib/schemas";
 import { AiUnavailableError, aiEnabled, asData, callTool, DATA_RULE } from "./ai";
 import { errorMessage, log } from "./log";
+import { compose } from "./skills";
+import { ContextManifest, SkillContext } from "@/lib/skills/context";
+import { SKILL_IDS, SKILLS, BASELINE_RULES } from "@/lib/skills/catalog";
+import { applyPlan, rulesPlan, TailorPlan, validatePlan, type Tailored } from "@/lib/tailor";
+import { parseCv } from "@/lib/resume";
+import { InterviewPrep, rulesPrep, validatePrep } from "@/lib/interview";
+import { fnv1a } from "@/lib/ab";
 
 export const AnalyzeInput = z.object({
   jobText: z.string().min(40).max(30000),
@@ -84,6 +91,8 @@ export const DraftInput = z.object({
     })
     .nullable()
     .default(null),
+  /** Personal skill layer for variant B. Null = baseline skill only. */
+  skills: SkillContext.nullable().default(null),
 });
 
 export interface DraftResult {
@@ -94,6 +103,8 @@ export interface DraftResult {
   limit: number | null;
   issues: Issue[];
   source: "ai" | "rules";
+  /** Exactly what the model was given; null when the rules engine wrote the draft. */
+  context: ContextManifest | null;
 }
 
 export async function draftMessage(input: z.infer<typeof DraftInput>): Promise<DraftResult> {
@@ -120,13 +131,20 @@ export async function draftMessage(input: z.infer<typeof DraftInput>): Promise<D
   const base = { shared, recipient, meta: { role: meta.role, company: meta.company }, limit };
 
   if (aiEnabled()) {
+    const skills = await compose("draft_message", "draft", input.skills, {
+      documents: [
+        { label: "Their profile", chars: input.recipientText.length },
+        { label: "Your resume and background", chars: me.length },
+        ...(input.jobText ? [{ label: "Job post", chars: input.jobText.length }] : []),
+      ],
+    });
     let feedback: Issue[] = [];
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const draft = await aiDraft(input, ctx, shared, src, limit, feedback);
+        const draft = await aiDraft(input, ctx, shared, src, limit, feedback, skills);
         const fitted = fitToLimit(draft, limit);
         const v = validateDraft(fitted, src, limit);
-        if (v.ok) return { ...base, draft: fitted, issues: v.issues, source: "ai" };
+        if (v.ok) return { ...base, draft: fitted, issues: v.issues, source: "ai", context: skills.manifest };
         feedback = v.issues.filter((i) => i.severity === "error");
         log("info", "draft.rejected_by_validator", { attempt, errors: feedback.map((i) => i.kind) });
       } catch (e) {
@@ -137,7 +155,7 @@ export async function draftMessage(input: z.infer<typeof DraftInput>): Promise<D
     }
   }
   const draft = rulesDraft(input.guidance?.opener === "role_led" ? { ...ctx, shared: [] } : ctx);
-  return { ...base, draft, issues: validateDraft(draft, src, limit).issues, source: "rules" };
+  return { ...base, draft, issues: validateDraft(draft, src, limit).issues, source: "rules", context: null };
 }
 
 async function aiDraft(
@@ -147,6 +165,7 @@ async function aiDraft(
   src: { recipient: string; me: string; job: string },
   limit: number | null,
   feedback: Issue[],
+  skills: Awaited<ReturnType<typeof compose>>,
 ): Promise<Draft> {
   const parts = STAGE_PARTS[ctx.stage];
   const strong = ctx.fit?.ratings.filter((r) => r.evidence === "strong" && r.resumeQuote).slice(0, 3) ?? [];
@@ -163,6 +182,8 @@ async function aiDraft(
     "STYLE: no em dashes; at most one exclamation mark; no filler like 'I hope this finds you well' or 'passionate'.",
     limit ? `The full rendered message (greeting + body + signoff) MUST be at most ${limit} characters. Use a one-line signoff like "- FirstName".` : "Keep it under 120 words.",
     input.channel === "email" ? "Include a specific subject line." : "subject must be null.",
+    "The cold-email-writer skill above is your baseline style guide. The grounding rules and the length limit in this message override it.",
+    skills.personal,
     DATA_RULE,
   ].join("\n");
   const user = [
@@ -180,7 +201,7 @@ async function aiDraft(
   ]
     .filter(Boolean)
     .join("\n\n");
-  return callTool({ action: "draft_message", tool: "write_draft", description: "Return the outreach draft as structured segments with grounded claims.", schema: Draft, system, user, maxTokens: 1500 });
+  return callTool({ action: "draft_message", tool: "write_draft", description: "Return the outreach draft as structured segments with grounded claims.", schema: Draft, system, user, maxTokens: 1500, cachedPrefix: skills.prefix });
 }
 
 const OPENER_INSTRUCTION: Record<z.infer<typeof Opener>, string> = {
@@ -330,4 +351,218 @@ export async function similarCompanies(input: z.infer<typeof SimilarInput>): Pro
     maxTokens: 800,
   });
   return out.companies;
+}
+
+// ---- Tailored CV ----
+
+export const TailorInput = z.object({
+  resume: z.string().min(80).max(40000),
+  jobText: z.string().max(30000).default(""),
+  fit: FitReport.nullable().default(null),
+  role: z.string().max(200).default(""),
+  company: z.string().max(200).nullable().default(null),
+  skills: SkillContext.nullable().default(null),
+  /** True for the comparison run: baseline skills only, no personal layer. */
+  baselineOnly: z.boolean().default(false),
+  /** Resume lines learned rules say to keep near the top (outreach into the CV). */
+  boosts: z.array(z.string().max(400)).max(5).default([]),
+});
+
+export interface TailorResult extends Tailored {
+  source: "ai" | "rules";
+  context: ContextManifest | null;
+}
+
+/**
+ * Tailor the resume to one job. The model proposes a plan citing rule ids;
+ * validatePlan keeps only grounded changes; applyPlan renders the result.
+ * Falls back to the rules plan (reordering only) if AI is off or fails.
+ */
+export async function tailorResume(input: z.infer<typeof TailorInput>): Promise<TailorResult> {
+  const ctx = input.baselineOnly ? null : input.skills;
+  const allowed = new Set([...BASELINE_RULES.map((r) => r.id), ...(ctx?.learned.map((r) => r.id) ?? [])]);
+  const opts = { resume: input.resume, jobText: input.jobText, fit: input.fit, role: `${input.role} ${input.company ?? ""}`, allowedRules: allowed };
+  const boosts = input.baselineOnly ? [] : input.boosts;
+  const fallback = (): TailorResult => {
+    const v = validatePlan(rulesPlan(input.resume, input.fit, input.jobText, boosts), opts);
+    return { ...applyPlan(input.resume, v.plan, input.fit, input.jobText, v.rejected), source: "rules", context: null };
+  };
+  if (!aiEnabled()) return fallback();
+  const skills = await compose("tailor_resume", "tailor", ctx, {
+    baselineOnly: input.baselineOnly,
+    documents: [
+      { label: "Your resume", chars: input.resume.length },
+      { label: "Job post", chars: input.jobText.length },
+    ],
+  });
+  const cv = parseCv(input.resume);
+  const numbered = cv.lines.map((l) => `${l.id}${l.heading ? " [heading]" : l.bullet ? " [bullet]" : ""} (${l.section || "top"}): ${l.text}`).join("\n");
+  try {
+    const plan = await callTool({
+      action: "tailor_resume",
+      tool: "tailor_plan",
+      description: "Propose a tailored version of the resume for this job as a validated edit plan.",
+      schema: TailorPlan,
+      cachedPrefix: skills.prefix,
+      system: [
+        "You tailor an early-career candidate's resume to one job, using the resume-tailor skill above as the baseline method and the supporting skills as checks.",
+        "Output a plan, not a new resume:",
+        "- summary: 1 to 2 sentences matching the role, built only from facts in the resume. null to leave as is.",
+        "- edits: rewrites of existing lines by lineId. Keep each line's facts; you may change verbs, order of clauses and wording. Every number must already be in that line. Where a number would help but is missing, add [add metric].",
+        "- order: for each section, the bullet lineIds in the new order (same lines, every one of them).",
+        "- talkingPoints: up to 3 cover-letter points, each with a quote copied verbatim from the resume.",
+        "- ruleIds on each change and in applied: the ids of the rules you followed (baseline ids like resume-tailor/relevant-first, or learned ids in brackets below). Only cite ids that appear in this prompt.",
+        "Never add a skill, tool or term the resume doesn't already mention, even if the job post asks for it. Code rejects any change that does.",
+        boosts.length ? `Keep these lines near the top of their section (they led outreach that got responses): ${boosts.map((b) => `"${b}"`).join("; ")}` : "",
+        skills.personal,
+        DATA_RULE,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      user: [`Role: ${input.role}${input.company ? ` at ${input.company}` : ""}`, asData("resume_lines", numbered), asData("job_post", input.jobText.slice(0, 12000))].join("\n\n"),
+      maxTokens: 2500,
+    });
+    const v = validatePlan(plan, opts);
+    if (v.rejected.length) log("info", "tailor.rejected_by_validator", { count: v.rejected.length });
+    return { ...applyPlan(input.resume, v.plan, input.fit, input.jobText, v.rejected), source: "ai", context: skills.manifest };
+  } catch (e) {
+    if (!(e instanceof AiUnavailableError)) log("warn", "tailor.fallback", { error: errorMessage(e) });
+    return fallback();
+  }
+}
+
+// ---- Interview prep ----
+
+export const InterviewInput = z.object({
+  resume: z.string().max(40000).default(""),
+  jobText: z.string().max(30000).default(""),
+  fit: FitReport.nullable().default(null),
+  role: z.string().max(200).default(""),
+  skills: SkillContext.nullable().default(null),
+});
+
+export interface InterviewResult {
+  prep: InterviewPrep;
+  fixed: number;
+  source: "ai" | "rules";
+  context: ContextManifest | null;
+}
+
+export async function interviewPrep(input: z.infer<typeof InterviewInput>): Promise<InterviewResult> {
+  const fallback = (): InterviewResult => ({ prep: rulesPrep(input.fit, input.jobText, input.resume), fixed: 0, source: "rules", context: null });
+  if (!aiEnabled() || input.resume.length < 40) return fallback();
+  const skills = await compose("interview_prep", "interview", input.skills, {
+    documents: [
+      { label: "Your resume", chars: input.resume.length },
+      { label: "Job post", chars: input.jobText.length },
+    ],
+  });
+  try {
+    const out = await callTool({
+      action: "interview_prep",
+      tool: "write_prep",
+      description: "Return likely interview questions with STAR outlines built from the candidate's resume.",
+      schema: InterviewPrep,
+      cachedPrefix: skills.prefix,
+      system: [
+        "Using the interview-prep-generator skill above, write 5 to 7 likely questions for this job, one per important requirement, plus 3 questions the candidate should ask.",
+        "For each question: requirement = the post's requirement it tests; quote = one resume line copied verbatim that best answers it, or null.",
+        "STAR: build situation, task, action and result only from the quoted line and the resume. Anything the resume doesn't say must be written as [fill in]. Never invent companies, numbers, or outcomes.",
+        skills.personal,
+        DATA_RULE,
+      ].join("\n"),
+      user: [`Role: ${input.role}`, asData("resume", input.resume), asData("job_post", input.jobText.slice(0, 12000))].join("\n\n"),
+      maxTokens: 2500,
+    });
+    const v = validatePrep(out, input.resume, input.jobText);
+    return { prep: v.prep, fixed: v.fixed, source: "ai", context: skills.manifest };
+  } catch (e) {
+    if (!(e instanceof AiUnavailableError)) log("warn", "interview.fallback", { error: errorMessage(e) });
+    return fallback();
+  }
+}
+
+// ---- Rules from outcome notes ----
+
+export const NotesInput = z.object({
+  notes: z
+    .array(
+      z.object({
+        appId: z.string().max(80),
+        family: z.string().max(80),
+        result: z.string().max(40),
+        reason: z.string().max(60),
+        reasonSource: z.string().max(40),
+        notes: z.string().max(2000),
+        learning: z.string().max(1000),
+      }),
+    )
+    .min(1)
+    .max(25),
+  /** Rules already in the playbook, so the model doesn't repeat them. */
+  existing: z.array(z.string().max(300)).max(40).default([]),
+});
+
+export interface NoteRule {
+  key: string;
+  skill: (typeof SKILL_IDS)[number];
+  family: string | null;
+  text: string;
+  appIds: string[];
+}
+
+/**
+ * Turn the user's own outcome notes ("what happened", "what I'd change")
+ * into proposed rules for specific skills. Code checks each one: a real
+ * skill, real applications cited, a job type that was in the notes, and no
+ * number the notes don't contain. The user still accepts or dismisses each.
+ */
+export async function rulesFromNotes(input: z.infer<typeof NotesInput>): Promise<{ rules: NoteRule[]; dropped: number; source: "ai" | "rules" }> {
+  if (!aiEnabled()) return { rules: [], dropped: 0, source: "rules" };
+  try {
+    const out = await callTool({
+      action: "rules_from_notes",
+      tool: "propose_rules",
+      description: "Propose short, specific job-search rules drawn from the user's own outcome notes, each attached to one skill.",
+      schema: z.object({
+        rules: z.array(z.object({ skill: z.string(), family: z.string().nullable(), text: z.string().max(220), appIds: z.array(z.string()).min(1).max(10) })).max(6),
+      }),
+      system: [
+        "You read a job seeker's own notes about how applications ended and what they'd change, and propose up to 6 rules for next time.",
+        `Each rule belongs to exactly one skill: ${SKILL_IDS.map((id) => `${id} (${SKILLS[id].does})`).join("; ")}.`,
+        "A rule is one imperative sentence (max 25 words), specific and actionable. family = the job type it applies to if the notes are about one, else null.",
+        "appIds = the notes it comes from. Only propose a rule the notes actually support; if notes disagree, skip it. Don't repeat existing rules.",
+        "Use a number only if it appears in the cited notes. No em dashes. Never invent companies or names.",
+        DATA_RULE,
+      ].join("\n"),
+      user: [asData("notes", JSON.stringify(input.notes)), input.existing.length ? asData("existing_rules", input.existing.join("\n")) : ""].filter(Boolean).join("\n\n"),
+      maxTokens: 1200,
+    });
+    const byId = new Map(input.notes.map((n) => [n.appId, n]));
+    const families = new Set(input.notes.map((n) => n.family));
+    const rules: NoteRule[] = [];
+    let dropped = 0;
+    for (const r of out.rules) {
+      const skill = SKILL_IDS.find((id) => id === r.skill);
+      const cited = r.appIds.filter((id) => byId.has(id));
+      const text = r.text.trim();
+      const ok =
+        skill &&
+        cited.length > 0 &&
+        (r.family === null || families.has(r.family)) &&
+        text.length >= 15 &&
+        !/—/.test(text) &&
+        numbersAreGrounded(text, cited.map((id) => `${byId.get(id)!.notes} ${byId.get(id)!.learning}`));
+      if (!ok) {
+        dropped++;
+        continue;
+      }
+      rules.push({ key: `notes|${r.family ?? "all"}|${fnv1a(text.toLowerCase()).toString(36)}`, skill: skill!, family: r.family, text, appIds: cited });
+    }
+    if (dropped) log("info", "notes_rules.rejected_by_validator", { dropped });
+    return { rules, dropped, source: "ai" };
+  } catch (e) {
+    if (!(e instanceof AiUnavailableError)) log("warn", "notes_rules.failed", { error: errorMessage(e) });
+    return { rules: [], dropped: 0, source: "rules" };
+  }
 }

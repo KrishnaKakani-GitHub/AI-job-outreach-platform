@@ -182,9 +182,10 @@ export function Button({
 }
 
 /** Small evidence-strength label used on every learned suggestion. */
-export function EvidenceBadge({ tier }: { tier: "job_post" | "early" | "pattern" | "strong" }) {
+export function EvidenceBadge({ tier }: { tier: "job_post" | "notes" | "early" | "pattern" | "strong" }) {
   const map = {
     job_post: { label: "Based on this job post", cls: "bg-sunk text-ink-2" },
+    notes: { label: "From your notes", cls: "border border-line text-ink-2" },
     early: { label: "Early signal", cls: "bg-warn-soft text-warn" },
     pattern: { label: "Pattern", cls: "bg-accent-soft text-ink" },
     strong: { label: "Strong pattern", cls: "bg-accent text-accent-ink" },

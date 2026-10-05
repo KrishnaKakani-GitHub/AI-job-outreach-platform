@@ -5,6 +5,21 @@ export const metadata: Metadata = { title: "Changelog · Warm Intro", descriptio
 
 const ENTRIES = [
   {
+    version: "v1.2",
+    date: "October 5, 2026",
+    shipped: [
+      "Skills: ten baseline skills from ResumeSkills, used unchanged, each with a personal layer learned from your outcomes, a version history, and a SKILL.md export for Claude.",
+      "Every checkable piece of baseline advice is scored against your outcomes per job type; advice that isn't working for you is paused.",
+      "Patterns by job type: what each kind of role asks for, which asks mattered once your resume showed them, and which post features went with a response.",
+      "Tailored resume for each job, built only from your own lines, with each change tied to its rule and a side-by-side baseline comparison.",
+      "Interview prep when an application reaches the interview stage, with STAR outlines from your resume and [fill in] where it is silent.",
+      "Rules from your outcome notes, proposed by AI, checked by code, used only after you accept them.",
+      "Insight ledger: every insight is graded on responses and on interviews; Insights shows what was on your resume for each interview, and each job type gets an apply-more or apply-less signal.",
+      "Memory log of every AI message, resume sent, interview, outcome and skill change; every outcome re-scores every skill.",
+      "“What the AI saw” on every AI output.",
+    ],
+  },
+  {
     version: "v1.1",
     date: "October 5, 2026",
     shipped: [

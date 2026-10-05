@@ -68,6 +68,7 @@ export default function CasePage() {
           <li><strong>Grounded draft:</strong> stage-aware (invite note, follow-up, referral ask), recipient-aware, color-coded by part. Every personal detail links to its source, and code rejects any name that appears in none of the documents.</li>
           <li><strong>Tracker:</strong> applications, contacts, sources, follow-ups and an outcome log that separates what employers said from guesses, plus LinkedIn import and backups.</li>
           <li><strong>Learning loop:</strong> every new job gets a &ldquo;Craft this application&rdquo; card built from the difference between your applications that got a response and the ones that didn&apos;t. Each suggestion shows its reason, the past applications behind it, and an evidence label (job post only → early signal at 5 outcomes → pattern at 15 → strong at 30 per group). Rules you accept go into a personal playbook that shapes every draft, and message openings are chosen by Thompson sampling so the app keeps testing instead of locking in early luck.</li>
+          <li><strong>Skills that learn:</strong> ten baseline skills (resume tailoring, bullets, numbers, keyword coverage, outreach, interview prep and more) are used unchanged, then each grows a personal layer. Every checkable piece of advice is scored against the user&apos;s own outcomes per job type and paused where it isn&apos;t working; accepted rules from outcomes, job-post patterns, successful outreach and the user&apos;s notes are added on top. Each output shows exactly what the model saw, and a tailored resume can be compared with what the baseline skills alone produce.</li>
         </ul>
         <p><strong>Deliberately left out:</strong> auto-sending, LinkedIn scraping or login, accounts, server-side storage of documents, Gmail scanning, interview prep, and full resume rewrites (they tend to invent experience).</p>
         <p><strong>Design rule:</strong> the AI proposes; deterministic code validates and decides. If the model is unavailable or fails a check, the app falls back to a rules-based version instead of showing an unchecked draft.</p>
@@ -84,7 +85,7 @@ export default function CasePage() {
         <H2 id="s6">6. The iteration</H2>
         <p>What changes next is decided by the live result and by RICE scores for the candidate tests below (inputs are planning estimates).</p>
         <p className="text-[14px] text-ink-3">
-          Tracker, outcome logging, network, and Insights features were adapted from Sanjana Gowda&apos;s AI Job Tracker and Rejection Analyzer (<a href="https://github.com/sanjana1311/job-tracker">github.com/sanjana1311/job-tracker</a>). The implementation is original.
+          Tracker, outcome logging, network, and Insights features were adapted from Sanjana Gowda&apos;s AI Job Tracker and Rejection Analyzer (<a href="https://github.com/sanjana1311/job-tracker">github.com/sanjana1311/job-tracker</a>). The implementation is original. The baseline skills are Param Choudhary&apos;s ResumeSkills (<a href="https://github.com/Paramchoudhary/ResumeSkills">github.com/Paramchoudhary/ResumeSkills</a>, MIT), included unchanged; the scoring and personal layer are original.
         </p>
       </Prose>
 
