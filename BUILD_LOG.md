@@ -36,6 +36,17 @@ This was a two-day build with an AI coding agent, which planned, wrote and teste
 - **Bandit.** Openings are chosen by seeded Thompson sampling over Beta posteriors, so early luck can't lock in a style. It only shapes variant B, so the A/B test stays clean.
 - **Checked by:** 44 new unit tests (outcomes, tiers, contrasts, bandit, playbook sync, CSV edge cases including formula injection, backup validation) and 4 new end-to-end tests including an axe scan of the tracker and Insights.
 
+## v1.2: skills that learn from outcomes
+
+- **Baseline, unchanged.** Ten `SKILL.md` files from Param Choudhary's ResumeSkills (MIT) ship in `skills/baseline/` and are sent to the model as written: the primary skill for each action in full (prompt-cached), supporting skills as condensed advice.
+- **Scoring the advice.** Each piece of advice that code can check (action verbs, numbers in bullets, standard headings, keyword coverage, a summary that matches the role, tailoring at all, interview prep) is checked on the resume that actually went out. The resume is frozen when an application is applied for, so its outcome can score each rule: followed vs not, overall and per job type, with job types shrunk toward the overall rate.
+- **Job types.** Analytics engineering is no longer lumped with data engineering, and the user can override the guessed type. Requirement terms are compared by whether the resume showed them, among posts that asked, so the app can tell "posts that ask for dbt" from "dbt on my resume".
+- **Personal layer.** Accepted rules (from outcomes, job-type patterns, the resume line successful outreach led with, and AI-read outcome notes) plus working and paused baseline advice make up each skill's personal layer. A new version is recorded whenever it changes, with what changed. Exploration holds an accepted rule back at most 20% of the time when its evidence is uncertain, so it keeps getting tested.
+- **Checked outputs.** Tailored resumes only reword and reorder existing lines; code rejects new numbers, job-post terms the resume never mentions, and unknown names, and shows what it blocked. Interview prep replaces unsupported details with `[fill in]`.
+- **Verifiable.** Every AI output carries a manifest built from the same inputs as its prompt. Tests check the prompt contains everything the manifest lists and nothing held back, and that the baseline-only comparison sends no personal layer.
+- **Insight ledger and memory.** Each rule is scored twice: on getting a response and on getting an interview. Every AI message, kept resume, application, interview, outcome, rule decision and skill version is written to a local memory log, and every outcome triggers a re-score of every skill.
+- **Checked by:** 46 new unit tests and 2 new end-to-end tests, including axe scans of the Skills panel and the tailored resume (which caught two scrollable regions that weren't keyboard-focusable).
+
 ## What was automated
 
 - Scaffolding, typed schemas and test suites
