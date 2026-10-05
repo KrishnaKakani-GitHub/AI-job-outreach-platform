@@ -87,22 +87,6 @@ The workflow is in `docs/ci.yml` because the tool used to publish this repo cann
 
 No lockfile is committed yet, so CI uses `npm install`. Every dependency in `package.json` is pinned to an exact version; commit the `package-lock.json` from your first local install and switch CI to `npm ci`.
 
-## Deploy (Vercel + Neon)
-
-1. Import the GitHub repo in Vercel. The defaults work.
-2. Optional: create a free Neon Postgres database and set `DATABASE_URL`. The events table is created on first write. Without it, events live in memory and reset on each deploy.
-3. Optional: set `ANTHROPIC_API_KEY` and, if you want a different model, `ANTHROPIC_MODEL`.
-4. Check `/api/status`, which reports whether AI and durable storage are on.
-
-## Known limits
-
-- The live model path is unit-tested with mocked responses. It runs against the real API once a key is configured.
-- LinkedIn invite-note limits (200 characters free, 300 Premium) come from 2026 third-party guides. LinkedIn does not publish them.
-- Similar-company suggestions come from the model's knowledge. Users are told to verify that each company is hiring.
-- Rejection "reasons" are presented as likely patterns, never as the employer's actual decision.
-
 ## Acknowledgments
 
 Tracker, outcome logging, network, and Insights features adapted from Sanjana Gowda's AI Job Tracker and Rejection Analyzer ([github.com/sanjana1311/job-tracker](https://github.com/sanjana1311/job-tracker)). The implementation here is original; no code was copied.
-
-See `BUILD_LOG.md` for how this was built and `PLAYBOOK.md` to reuse the experiment setup.
