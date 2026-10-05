@@ -32,6 +32,8 @@ export async function callTool<S extends z.ZodTypeAny>(opts: {
   system: string;
   user: string;
   maxTokens?: number;
+  /** Large, stable instructions (baseline skills) sent first and marked for prompt caching. */
+  cachedPrefix?: string;
 }): Promise<z.infer<S>> {
   if (!aiEnabled()) throw new AiUnavailableError("ANTHROPIC_API_KEY is not set");
   const started = Date.now();
@@ -41,7 +43,12 @@ export async function callTool<S extends z.ZodTypeAny>(opts: {
     const res = await getClient().messages.create({
       model: MODEL,
       max_tokens: opts.maxTokens ?? 2000,
-      system: opts.system,
+      system: opts.cachedPrefix
+        ? [
+            { type: "text", text: opts.cachedPrefix, cache_control: { type: "ephemeral" } },
+            { type: "text", text: opts.system },
+          ]
+        : opts.system,
       tools: [{ name: opts.tool, description: opts.description, input_schema: inputSchema as Anthropic.Tool.InputSchema }],
       tool_choice: { type: "tool", name: opts.tool, disable_parallel_tool_use: true },
       messages: [{ role: "user", content: opts.user }],
@@ -50,7 +57,7 @@ export async function callTool<S extends z.ZodTypeAny>(opts: {
     if (!block) throw new Error(`model returned no tool call (stop_reason=${res.stop_reason})`);
     const parsed = opts.schema.safeParse(block.input);
     if (!parsed.success) throw new Error(`schema validation failed: ${parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-    log("info", "ai.tool_call", { action: opts.action, tool: opts.tool, model: MODEL, ms: Date.now() - started, inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens });
+    log("info", "ai.tool_call", { action: opts.action, tool: opts.tool, model: MODEL, ms: Date.now() - started, inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, cacheReadTokens: res.usage.cache_read_input_tokens ?? 0 });
     return parsed.data;
   } catch (e) {
     log("warn", "ai.tool_call_failed", { action: opts.action, tool: opts.tool, model: MODEL, ms: Date.now() - started, error: errorMessage(e) });
