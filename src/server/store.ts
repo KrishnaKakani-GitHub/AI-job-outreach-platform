@@ -61,6 +61,18 @@ function median(xs: number[]): number | null {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
+/** Time of the first recorded exposure (when the experiment actually started), or null. */
+export async function startedAt(experiment: string): Promise<number | null> {
+  if (persistence() === "memory") {
+    const first = memory.find((r) => r.experiment === experiment && r.type === "exposure");
+    return first?.at ?? null;
+  }
+  await ensureTable();
+  const rows = (await sql()`SELECT EXTRACT(EPOCH FROM MIN(at)) * 1000 AS t FROM experiment_events WHERE experiment = ${experiment} AND type = 'exposure'`) as { t: number | string | null }[];
+  const t = rows[0]?.t;
+  return t === null || t === undefined ? null : Number(t);
+}
+
 /** Per-arm unique-user counts. A user counts once per event type. */
 export async function summarize(experiment: string): Promise<ArmSummary[]> {
   let rows: { anon_id: string; variant: string; type: string; value: number | null }[];

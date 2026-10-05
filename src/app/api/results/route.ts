@@ -1,10 +1,11 @@
 import { EXPERIMENT } from "@/lib/ab";
-import { persistence, summarize } from "@/server/store";
+import { persistence, startedAt, summarize } from "@/server/store";
 import { serverError } from "@/server/http";
 
 export async function GET() {
   try {
-    return Response.json({ experiment: EXPERIMENT, persistence: persistence(), arms: await summarize(EXPERIMENT) });
+    const [arms, started] = await Promise.all([summarize(EXPERIMENT), startedAt(EXPERIMENT)]);
+    return Response.json({ experiment: EXPERIMENT, persistence: persistence(), startedAt: started, arms });
   } catch (e) {
     return serverError("results.error", e);
   }
