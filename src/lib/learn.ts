@@ -13,10 +13,10 @@
  *   15+ outcomes → "pattern"
  *   30+ per comparison group → "strong"
  */
-import type { Application, Contact, FitReport, GapTag, Opener, RecipientType } from "./schemas";
+import type { Application, Contact, FitReport, GapTag, JobType, Opener, RecipientType } from "./schemas";
 import { GAP_LABELS } from "./fit";
-import { reached, roleFamily } from "./insights";
-import { keywords, normalize, stem } from "./text";
+import { familyOf, reached } from "./insights";
+import { GENERIC_TERMS, keywords, normalize, stem } from "./text";
 import { mulberry32 } from "./stats";
 
 export const DAY = 86_400_000;
@@ -26,11 +26,13 @@ export const TIER_PERSONAL = 5;
 export const TIER_PATTERN = 15;
 export const TIER_STRONG_PER_GROUP = 30;
 
-export type Tier = "job_post" | "early" | "pattern" | "strong";
+/** "notes" = drawn from the user's own outcome notes, not yet backed by outcome counts. */
+export type Tier = "job_post" | "notes" | "early" | "pattern" | "strong";
 export type Outcome = "success" | "failure" | "pending";
 
 export const TIER_LABEL: Record<Tier, string> = {
   job_post: "Based on this job post",
+  notes: "From your notes",
   early: "Early signal",
   pattern: "Pattern",
   strong: "Strong pattern",
@@ -150,7 +152,7 @@ export function appFeatures(a: Application, contacts: Contact[]): AppFeatures {
   });
   const score = a.fit?.score ?? null;
   return {
-    family: roleFamily(a.role),
+    family: familyOf(a),
     resumeVersion: a.resumeVersion,
     source: a.source,
     networkedFirst,
@@ -220,13 +222,14 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 
 export interface SimilarityTarget {
   role: string;
+  jobType?: JobType | null;
   seniority: string;
   fit: FitReport | null;
   jobText: string;
 }
 
 export function similarity(t: SimilarityTarget, a: Application): number {
-  const fam = roleFamily(t.role) === roleFamily(a.role) ? 0.5 : 0;
+  const fam = familyOf(t) === familyOf(a) ? 0.5 : 0;
   const sen = t.seniority === a.seniority ? 0.15 : 0;
   return fam + sen + 0.35 * jaccard(reqKeywords(t), reqKeywords(a));
 }
@@ -294,7 +297,7 @@ export function chooseOpener(stats: ArmStat[], feasible: Opener[], seed: number)
 }
 
 /** Beta draw via two gamma draws (Marsaglia–Tsang), seeded for reproducibility. */
-function betaDraw(a: number, b: number, rng: () => number): number {
+export function betaDraw(a: number, b: number, rng: () => number): number {
   const x = gamma(a, rng);
   return x / (x + gamma(b, rng));
 }
@@ -372,7 +375,7 @@ export interface TermPattern {
 }
 
 /** Surface form for each stem, so patterns read as real words. */
-function surface(texts: string[]): Map<string, string> {
+export function surface(texts: string[]): Map<string, string> {
   const count = new Map<string, Map<string, number>>();
   for (const t of texts)
     for (const w of normalize(t).split(/[\s/]+/)) {
@@ -396,7 +399,7 @@ export function jdPatterns(resolved: Resolved[], limit = 6, minWith = 3): TermPa
   for (const d of docs) for (const t of d.terms) df.set(t, (df.get(t) ?? 0) + 1);
   const out: TermPattern[] = [];
   for (const [t, n] of df) {
-    if (n < minWith || n === docs.length || t.length < 3) continue;
+    if (n < minWith || n === docs.length || t.length < 3 || GENERIC_TERMS.has(t)) continue;
     const w = { s: 0, n: 0 };
     const wo = { s: 0, n: 0 };
     for (const d of docs) {
@@ -463,7 +466,7 @@ export interface Evidence {
 
 export interface Reco {
   id: string;
-  kind: "lead" | "gap" | "language" | "resume" | "network" | "recipient" | "opener" | "family" | "rule";
+  kind: "lead" | "gap" | "language" | "resume" | "network" | "recipient" | "opener" | "family" | "rule" | "jobtype";
   title: string;
   advice: string;
   why: string;
@@ -485,6 +488,7 @@ export interface Craft {
 export interface CraftInput {
   targetId: string | null;
   role: string;
+  jobType?: JobType | null;
   seniority: string;
   fit: FitReport | null;
   jobText: string;
@@ -512,7 +516,7 @@ function capitalize(s: string): string {
 export function craftApplication(input: CraftInput): Craft {
   const { now, apps, contacts } = input;
   const byId = new Map(apps.map((a) => [a.id, a]));
-  const family = roleFamily(input.role);
+  const family = familyOf(input);
   const resolved = resolvedApps(apps, now, input.targetId ?? undefined);
   const progress = tierProgress(apps.filter((a) => a.id !== input.targetId), now);
   const recos: Reco[] = [];
@@ -559,7 +563,7 @@ export function craftApplication(input: CraftInput): Craft {
   let scope: Craft["scope"] = "none";
   let pool: Resolved[] = [];
   if (progress.tier !== "job_post") {
-    const similar = input.fit || input.jobText ? similarResolved({ role: input.role, seniority: input.seniority, fit: input.fit, jobText: input.jobText }, resolved) : [];
+    const similar = input.fit || input.jobText ? similarResolved({ role: input.role, jobType: input.jobType, seniority: input.seniority, fit: input.fit, jobText: input.jobText }, resolved) : [];
     const ss = similar.filter((r) => r.outcome === "success").length;
     if (similar.length >= TIER_PERSONAL && ss > 0 && ss < similar.length) {
       pool = similar;
@@ -632,7 +636,7 @@ export function craftApplication(input: CraftInput): Craft {
     }
 
     // Role family comparison.
-    const fams = groupBy(resolved, (r) => roleFamily(r.app.role));
+    const fams = groupBy(resolved, (r) => familyOf(r.app));
     const mine = fams.find((f) => f.level === family);
     const top = fams.find((f) => f.n >= 2);
     if (mine && top && mine.n >= 2 && top.level !== family && top.rate > mine.rate) {
