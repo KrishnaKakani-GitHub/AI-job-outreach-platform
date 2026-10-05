@@ -7,9 +7,9 @@ import { kindLabel, loadSimilar, type FitPayload, type PastePayload, type Simila
 import { db } from "@/client/db";
 import { pct, ScoreRing } from "./charts";
 import { IconCheck, IconDoc } from "./icons";
+import { EvidenceBadge } from "./ui";
+import { COMPANY_LABEL, labelFor, SENIORITY_LABEL } from "@/lib/labels";
 
-const SENIORITY_LABEL: Record<string, string> = { intern: "Internship", entry: "Entry level", mid: "Mid level", senior: "Senior", unknown: "Level not stated" };
-const COMPANY_LABEL: Record<string, string> = { startup: "Startup", growth: "Growth stage", enterprise: "Large company", nonprofit: "Nonprofit", agency: "Agency", unknown: "Company type not stated" };
 const EVIDENCE_STYLE: Record<Evidence, { label: string; cls: string }> = {
   strong: { label: "Strong", cls: "bg-accent-soft text-ink" },
   partial: { label: "Partial", cls: "bg-warn-soft text-warn" },
@@ -141,9 +141,14 @@ export function StrategyCard({ p }: { p: StrategyPayload }) {
   return (
     <article className="settle rounded-2xl border border-line bg-surface" aria-label="Next steps">
       <header className="px-4 pb-2 pt-4">
-        <h3 className="text-[16px] font-semibold">Your next moves</h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-[16px] font-semibold">Your next moves</h3>
+          {p.progress && <EvidenceBadge tier={p.progress.tier} />}
+        </div>
         <p className="mt-1 max-w-[68ch] text-[14.5px] leading-relaxed">{narrative.summary}</p>
-        <p className="mt-1 text-[12px] text-ink-3">Based on {facts.status.applied} applications and {facts.status.outcomes} outcomes. Reasons for rejections are likely patterns, not certainties.</p>
+        <p className="mt-1 text-[12px] text-ink-3">
+          Based on {facts.status.applied} applications{p.progress ? ` and ${p.progress.resolved} outcomes` : ""}. {p.progress?.next ?? ""} Reasons for rejections are likely patterns, not certainties.
+        </p>
       </header>
 
       {facts.stalls.length > 0 && (
@@ -162,7 +167,7 @@ export function StrategyCard({ p }: { p: StrategyPayload }) {
             {facts.targets.map((t, i) => (
               <li key={`${t.family}-${t.seniority}`} className="text-[14px]">
                 <p className="font-medium">
-                  {t.family}, {SENIORITY_LABEL[t.seniority] ?? t.seniority}
+                  {t.family}, {labelFor(SENIORITY_LABEL, t.seniority)}
                   <span className="ml-2 text-[12.5px] font-normal text-ink-3">average fit {t.avgFit} · response {t.progress.enough ? pct(t.progress.rate) : `${t.progress.k}/${t.progress.n}`}</span>
                 </p>
                 <p className="text-ink-2">{narrative.targetWhy[i]}</p>
