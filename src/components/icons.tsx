@@ -22,6 +22,7 @@ export const IconBriefcase = (p: P) => (<svg {...base(p)}><rect x="3" y="7" widt
 export const IconMail = (p: P) => (<svg {...base(p)}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></svg>);
 export const IconCompass = (p: P) => (<svg {...base(p)}><circle cx="12" cy="12" r="9" /><path d="M15.5 8.5l-2 5-5 2 2-5z" /></svg>);
 export const IconLock = (p: P) => (<svg {...base(p)}><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>);
+export const IconSpark = (p: P) => (<svg {...base(p)}><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" /><path d="M19 16v4M17 18h4" /></svg>);
 export const IconAlert = (p: P) => (<svg {...base(p)}><path d="M12 4l9 16H3z" /><path d="M12 10v4M12 17v.5" /></svg>);
 
 /** Brand mark: two overlapping speech arcs, an introduction between two people. */

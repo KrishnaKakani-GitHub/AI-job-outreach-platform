@@ -26,7 +26,9 @@ describe("insights", () => {
   it("maps roles to families", () => {
     expect(roleFamily("Product Manager: New Grad Accelerator")).toBe("Product");
     expect(roleFamily("Growth Engineer")).toBe("Growth");
-    expect(roleFamily("Associate Data Analyst")).toBe("Analyst");
+    expect(roleFamily("Associate Data Analyst")).toBe("Data analytics");
+    expect(roleFamily("Analytics Engineer")).toBe("Analytics engineering");
+    expect(roleFamily("Data Engineer")).toBe("Data engineering");
   });
 });
 
