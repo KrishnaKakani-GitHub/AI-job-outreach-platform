@@ -58,7 +58,7 @@ export function InsightsPanel({ demo, onClose }: { demo: boolean; onClose: () =>
         <div className="py-8 text-center">
           <p className="text-[15px] font-medium">Nothing to learn from yet</p>
           <p className="mx-auto mt-1 max-w-[38ch] text-[13.5px] text-ink-2">
-            Paste a job post or add an application in the Tracker. Suggestions start from the job post itself and get personal after {TIER_PERSONAL} outcomes.
+            Paste a job post or add an application in the Tracker. Analysis starts from the first job post, and personal suggestions start with your first outcome.
           </p>
           <p className="mt-6 text-[13px] text-ink-3">Want to see it first? Turn on demo data in the sidebar.</p>
         </div>
@@ -124,7 +124,7 @@ export function InsightsPanel({ demo, onClose }: { demo: boolean; onClose: () =>
 
         <Block title="Your playbook" note="Rules learned from your own outcomes. Accepted rules shape every suggestion and AI draft.">
           {visibleRules.length === 0 ? (
-            <p className="text-[13.5px] text-ink-3">{progress.tier === "job_post" ? `Rules appear once personal suggestions start (${TIER_PERSONAL} outcomes with at least one response and one without).` : "No clear rules yet. They appear when one choice clearly beats the alternatives."}</p>
+            <p className="text-[13.5px] text-ink-3">{progress.tier === "job_post" ? "Rules appear with your first outcomes: one application that got a response and one that didn't is enough to compare." : "No clear rules yet. They appear as soon as one choice beats the alternatives in your history."}</p>
           ) : (
             <ul className="space-y-2.5">
               {visibleRules.map((r) => (

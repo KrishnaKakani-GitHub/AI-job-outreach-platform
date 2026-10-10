@@ -117,7 +117,8 @@ describe("rule scoring", () => {
     const pm = [app({ role: "Product Manager", ...responded, ...follows(false) }), app({ role: "Product Manager", ...rejected, ...follows(true) })];
     const scores = scoreRule(id, "cv", [...apps, ...pm], [], NOW);
     const product = scores.find((s) => s.family === "Product")!;
-    expect(product.tier).toBe("job_post");
+    // Two outcomes are analysed right away, labelled as an early signal.
+    expect(product.tier).toBe("early");
     // Raw rates say 0% vs 100%; shrinkage keeps the estimate far from -1.
     expect(product.lift).toBeGreaterThan(-0.6);
   });

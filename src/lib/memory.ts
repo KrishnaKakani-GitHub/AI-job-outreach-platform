@@ -42,11 +42,14 @@ export const MEMORY_GROUPS: { label: string; kinds: MemoryKind[] }[] = [
   { label: "Learning", kinds: ["rule_proposed", "rule_accepted", "rule_dismissed", "skill_version", "relearn"] },
 ];
 
-/** How much a growing history can tell you, and when. */
+/**
+ * How confident the analysis gets as history grows. Analysis itself runs from
+ * the first outcome; milestones only mark when results firm up.
+ */
 export const MILESTONES: { at: number; unlocks: string }[] = [
-  { at: 10, unlocks: "early signals across all your applications" },
-  { at: 50, unlocks: "early signals inside your main job types" },
-  { at: 100, unlocks: "patterns inside each main job type" },
+  { at: 1, unlocks: "personal analysis starts, labelled as an early signal" },
+  { at: 15, unlocks: "patterns across all your applications" },
+  { at: 50, unlocks: "patterns inside your main job types" },
   { at: 200, unlocks: "strong comparisons for common advice across all roles (30 in each group)" },
   { at: 500, unlocks: "strong patterns inside your main job types" },
 ];
