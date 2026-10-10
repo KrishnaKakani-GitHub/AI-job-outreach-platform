@@ -17,6 +17,7 @@ import { traceRules } from "@/lib/skills/catalog";
 import type { ContextManifest, SkillContext } from "@/lib/skills/context";
 import { uid } from "@/lib/text";
 import { buildChatRequest } from "@/lib/chat";
+import { findResumeInHistory, nextResumeVersion } from "@/lib/ingest";
 import { addMessage, db, getProfile, saveProfile, updatePayload, type ChatMessage } from "./db";
 import { myVariant, prefs, track } from "./session";
 import { buildCraft, contextFor, freezeCv, guidanceFor, leadBoosts, refreshSkills, resumeFor, signedRules } from "./learning";
@@ -173,16 +174,31 @@ async function say(ctx: Ctx, text: string): Promise<void> {
   await addMessage({ id: uid(), chatId: ctx.chatId, role: "assistant", kind: "text", text });
 }
 
+/** Say a nudge at most once per chat, so the app never asks for the same thing over and over. */
+async function sayOnce(ctx: Ctx, text: string): Promise<void> {
+  const already = await db.messages.where("chatId").equals(ctx.chatId).filter((m) => m.role === "assistant" && m.text === text).count();
+  if (!already) await say(ctx, text);
+}
+
+/** Save a resume: version it when it changes (for A/B by resume version) and keep the name. */
+async function saveResume(text: string, source: "paste" | "recovered"): Promise<void> {
+  const prev = await getProfile();
+  const resumeVersion = nextResumeVersion(prev.resumeVersion, prev.resume, text);
+  await saveProfile({ resume: text, resumeVersion, name: prev.name || guessName(text) });
+  console.info(JSON.stringify({ level: "info", event: "resume.saved", source, chars: text.length, resumeVersion, changed: resumeVersion !== prev.resumeVersion }));
+}
+
 async function routeDocument(kind: DocKind, text: string, ctx: Ctx): Promise<void> {
   switch (kind) {
+    // Every document is saved, then analysed right away with whatever else is on file.
     case "resume":
-      await saveProfile({ resume: text, name: (await getProfile()).name || guessName(text) });
+      await saveResume(text, "paste");
       await addMessage({ id: uid(), chatId: ctx.chatId, role: "assistant", kind: "profile", payload: { what: "resume" } });
-      return;
+      return streamChat(text, ctx);
     case "background":
-      await saveProfile({ background: text });
+      await saveProfile({ background: text.slice(0, 2000) });
       await addMessage({ id: uid(), chatId: ctx.chatId, role: "assistant", kind: "profile", payload: { what: "background" } });
-      return;
+      return streamChat(text, ctx);
     case "job_description":
       return runFit(text, ctx);
     case "recipient_profile":
@@ -191,7 +207,9 @@ async function routeDocument(kind: DocKind, text: string, ctx: Ctx): Promise<voi
       // Emails (often rejections): answer in chat, with the saved resume in context.
       return streamChat(text, ctx);
     default:
-      await say(ctx, "I couldn't tell what this is. Use the label on your message to mark it as a resume, job description, LinkedIn profile, or email, and I'll take it from there.");
+      // Unlabelled: still analyse it now (the chat sees the full text). The label chip lets the user file it.
+      await sayOnce(ctx, "I wasn't sure what kind of document this is, so I'll read it as-is. Tap the label on your message to file it as a resume, job post, LinkedIn profile, or email.");
+      return streamChat(text, ctx);
   }
 }
 
@@ -244,7 +262,7 @@ async function runFit(jobText: string, ctx: Ctx): Promise<void> {
       console.warn(JSON.stringify({ level: "warn", event: "craft.failed", message: e instanceof Error ? e.message : String(e) }));
     }
     if (!profile.resume && !profile.background) {
-      await say(ctx, "Paste your resume too and I'll score this against your actual experience. Until then the fit check has nothing to compare with.");
+      await sayOnce(ctx, "This check is based on the job post alone. Paste your resume once and every check after this compares against it automatically.");
     }
   } finally {
     ctx.setStatus(null);
@@ -384,7 +402,7 @@ export async function runDraft(req: DraftRequest, ctx: Ctx): Promise<void> {
           guidance,
         } satisfies DraftPayload,
       });
-      if (!app) await say(ctx, "Tip: paste the job description in this chat too. Then the draft can say why you fit, using your strongest matching resume line.");
+      if (!app) await sayOnce(ctx, "Tip: paste the job description in this chat too. Then the draft can say why you fit, using your strongest matching resume line.");
     }
     void track("exposure");
     void track("draft_generated");
@@ -468,7 +486,15 @@ export async function loadSimilar(messageId: string, p: SimilarPayload): Promise
 async function streamChat(text: string, ctx: Ctx): Promise<void> {
   const stored = await db.messages.where("chatId").equals(ctx.chatId).sortBy("createdAt");
   const app = await chatApplication(ctx.chatId);
-  const profile = await getProfile();
+  let profile = await getProfile();
+  if (!profile.resume.trim()) {
+    // The user may have pasted it under the wrong label: recover it instead of asking again.
+    const found = findResumeInHistory(stored);
+    if (found) {
+      await saveResume(found, "recovered");
+      profile = await getProfile();
+    }
+  }
   const { messages: history, context } = buildChatRequest({
     messages: stored,
     text,

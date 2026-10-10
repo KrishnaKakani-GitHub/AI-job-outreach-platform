@@ -8,9 +8,9 @@
  * records. The AI may phrase rules around these facts but never supplies a
  * number. Suggestions always carry an evidence tier instead of being hidden
  * behind a threshold:
- *   0–4 outcomes (or no success/failure yet) → "job_post": from the job post and resume only
- *   5+ outcomes with ≥1 success and ≥1 failure → "early": personal suggestions start
- *   15+ outcomes → "pattern"
+ *   no outcomes yet → "job_post": from the job post and resume only
+ *   1+ outcome → "early": personal suggestions start immediately
+ *   15+ outcomes with ≥1 success and ≥1 failure → "pattern"
  *   30+ per comparison group → "strong"
  */
 import type { Application, Contact, FitReport, GapTag, JobType, Opener, RecipientType } from "./schemas";
@@ -22,8 +22,14 @@ import { mulberry32 } from "./stats";
 export const DAY = 86_400_000;
 export const NO_RESPONSE_DAYS = 21;
 export const MESSAGE_RESOLVE_DAYS = 14;
-export const TIER_PERSONAL = 5;
+/**
+ * Analysis starts with the first outcome. Small samples are labelled
+ * "Early signal" (and show "1 of 1" style counts) instead of being hidden.
+ */
+export const TIER_PERSONAL = 1;
 export const TIER_PATTERN = 15;
+/** Smallest group a comparison or rule will use. */
+export const MIN_GROUP = 1;
 export const TIER_STRONG_PER_GROUP = 30;
 
 /** "notes" = drawn from the user's own outcome notes, not yet backed by outcome counts. */
@@ -87,8 +93,8 @@ export function resolvedApps(apps: Application[], now: number, excludeId?: strin
 
 export function historyTier(successes: number, failures: number): Tier {
   const n = successes + failures;
-  if (n < TIER_PERSONAL || successes === 0 || failures === 0) return "job_post";
-  return n >= TIER_PATTERN ? "pattern" : "early";
+  if (n < TIER_PERSONAL) return "job_post";
+  return n >= TIER_PATTERN && successes > 0 && failures > 0 ? "pattern" : "early";
 }
 
 /** Tier for a two-group comparison (a vs b). */
@@ -99,9 +105,9 @@ export function comparisonTier(nA: number, nB: number): Exclude<Tier, "job_post"
 }
 
 export function messageTier(successes: number, resolved: number): Tier {
-  if (resolved < TIER_PERSONAL || successes === 0) return "job_post";
-  if (resolved >= TIER_STRONG_PER_GROUP * 2) return "strong";
-  return resolved >= TIER_PATTERN ? "pattern" : "early";
+  if (resolved < TIER_PERSONAL) return "job_post";
+  if (resolved >= TIER_STRONG_PER_GROUP * 2 && successes > 0) return "strong";
+  return resolved >= TIER_PATTERN && successes > 0 ? "pattern" : "early";
 }
 
 export interface TierProgress {
@@ -120,13 +126,14 @@ export function tierProgress(apps: Application[], now: number): TierProgress {
   const tier = historyTier(s, f);
   let next: string | null = null;
   if (tier === "job_post") {
+    next = "Personal suggestions start with your first outcome: a response, or no reply 21 days after applying.";
+  } else if (tier === "early") {
     const parts: string[] = [];
-    if (r.length < TIER_PERSONAL) parts.push(`${TIER_PERSONAL - r.length} more outcome${TIER_PERSONAL - r.length === 1 ? "" : "s"}`);
-    if (s === 0) parts.push("one application that gets a response");
+    if (r.length < TIER_PATTERN) parts.push(`${TIER_PATTERN - r.length} more outcome${TIER_PATTERN - r.length === 1 ? "" : "s"}`);
+    if (s === 0) parts.push("one that gets a response");
     if (f === 0) parts.push("one that doesn't");
-    next = `Personal suggestions start after ${parts.join(" and ")}.`;
-  } else if (tier === "early") next = `${TIER_PATTERN - r.length} more outcomes to reach "Pattern".`;
-  else next = `Comparisons become "Strong" with ${TIER_STRONG_PER_GROUP} outcomes in each group.`;
+    next = `Early signal: suggestions are live now and firm up into "Pattern" with ${parts.join(" and ")}.`;
+  } else next = `Comparisons become "Strong" with ${TIER_STRONG_PER_GROUP} outcomes in each group.`;
   return { tier, resolved: r.length, successes: s, failures: f, next };
 }
 
@@ -193,7 +200,7 @@ export interface Contrast {
 }
 
 /** The level that most outperforms everything else, if any level does. */
-export function bestContrast(levels: Level[], minN = 2): Contrast | null {
+export function bestContrast(levels: Level[], minN = MIN_GROUP): Contrast | null {
   let out: Contrast | null = null;
   for (const l of levels) {
     if (l.n < minN) continue;
@@ -361,7 +368,7 @@ export function draftGuidance(contacts: Contact[], sharedKinds: string[], now: n
   const short = messageStats(sent, now, (c) => (c.message!.chars < 150 ? "short" : "long"));
   const s1 = short.find((x) => x.key === "short");
   const s2 = short.find((x) => x.key === "long");
-  const maxChars = s1 && s2 && s1.n >= 2 && s2.n >= 2 && s1.s / s1.n > s2.s / s2.n ? 150 : null;
+  const maxChars = s1 && s2 && s1.n >= MIN_GROUP && s2.n >= MIN_GROUP && s1.s / s1.n > s2.s / s2.n ? 150 : null;
   return { opener: choice.opener, exploring: choice.exploring, why, maxChars, rules };
 }
 
@@ -392,7 +399,7 @@ export function surface(texts: string[]): Map<string, string> {
 }
 
 /** Job-post terms whose presence goes with a higher response rate in your own history. */
-export function jdPatterns(resolved: Resolved[], limit = 6, minWith = 3): TermPattern[] {
+export function jdPatterns(resolved: Resolved[], limit = 6, minWith = MIN_GROUP): TermPattern[] {
   const docs = resolved.map((r) => ({ r, terms: new Set(keywords(r.app.fit?.ratings.map((x) => x.requirement).join(" ") || r.app.jobText)) }));
   const names = surface(resolved.map((r) => r.app.fit?.ratings.map((x) => x.requirement).join(" ") || r.app.jobText));
   const df = new Map<string, number>();
@@ -638,8 +645,8 @@ export function craftApplication(input: CraftInput): Craft {
     // Role family comparison.
     const fams = groupBy(resolved, (r) => familyOf(r.app));
     const mine = fams.find((f) => f.level === family);
-    const top = fams.find((f) => f.n >= 2);
-    if (mine && top && mine.n >= 2 && top.level !== family && top.rate > mine.rate) {
+    const top = fams.find((f) => f.n >= MIN_GROUP && f.level !== family);
+    if (mine && top && mine.n >= MIN_GROUP && top.rate > mine.rate) {
       recos.push({
         id: "family",
         kind: "family",
@@ -659,7 +666,7 @@ export function craftApplication(input: CraftInput): Craft {
     const byType = messageStats(sent, now, (c) => c.recipientType);
     const referrals = new Map<RecipientType, number>();
     for (const c of contacts) if (c.stage === "referral") referrals.set(c.recipientType, (referrals.get(c.recipientType) ?? 0) + 1);
-    const bestType = byType.find((t) => t.n >= 2);
+    const bestType = byType.find((t) => t.n >= MIN_GROUP);
     if (bestType) {
       const label = { alum: "an alum", recruiter: "a recruiter", hr: "someone in HR", hiring_manager: "the hiring manager", team_member: "someone on the team" }[bestType.key as RecipientType];
       const refs = referrals.get(bestType.key as RecipientType) ?? 0;
@@ -680,7 +687,7 @@ export function craftApplication(input: CraftInput): Craft {
       now,
       (c) => c.message!.opener,
     );
-    const bo = byOpener.find((o) => o.n >= 2);
+    const bo = byOpener.find((o) => o.n >= MIN_GROUP);
     if (bo) {
       const rest = byOpener.filter((o) => o !== bo).reduce((a, t) => ({ s: a.s + t.s, n: a.n + t.n }), { s: 0, n: 0 });
       recos.push({

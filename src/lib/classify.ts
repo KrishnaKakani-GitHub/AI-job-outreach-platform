@@ -45,6 +45,25 @@ export interface Classification {
   ambiguous: boolean;
 }
 
+/** Personal contact details: a resume's header, rarely in a job post or email body. */
+const CONTACT = /[\w.+-]+@[\w-]+\.[\w.]+|\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}|linkedin\.com\/in\/|github\.com\//i;
+
+/** How many resume signals a text has (0 to 5): the 4 resume patterns plus contact details. */
+export function resumeHits(text: string): number {
+  const t = text.trim();
+  return SIGNALS.resume.reduce((n, re) => n + (re.test(t) ? 1 : 0), 0) + (CONTACT.test(t) ? 1 : 0);
+}
+
+/**
+ * A resume should never be bounced back with "I couldn't tell what this is":
+ * contact details plus two more resume signals is enough, unless it reads
+ * clearly as a job post.
+ */
+export function isStrongResume(text: string, scores?: Record<string, number>): boolean {
+  const t = text.trim();
+  return t.length > 300 && CONTACT.test(t) && resumeHits(t) >= 3 && (scores?.job_description ?? 0) < 0.75;
+}
+
 /** Below this, or with the runner-up within AMBIGUOUS_GAP, the app asks instead of acting. */
 export const MIN_CONFIDENCE = 0.4;
 export const AMBIGUOUS_GAP = 0.05;
@@ -69,6 +88,8 @@ export function classifyDocument(text: string): Classification {
     scores.message += 0.3;
     scores.recipient_profile -= 0.2;
   }
+
+  if (isStrongResume(t, scores)) return { kind: "resume", confidence: Math.max(0, Math.min(1, scores.resume)), scores, ambiguous: false };
 
   let kind: DocKind = "other";
   let best = 0.24;

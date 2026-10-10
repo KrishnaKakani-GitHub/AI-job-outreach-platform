@@ -12,7 +12,7 @@
  */
 import type { Application } from "./schemas";
 import { familyOf } from "./insights";
-import { bestContrast, comparisonTier, groupBy, historyTier, resolvedApps, surface, type Level, type Reco, type Resolved, type Tier } from "./learn";
+import { bestContrast, comparisonTier, MIN_GROUP, groupBy, historyTier, resolvedApps, surface, type Level, type Reco, type Resolved, type Tier } from "./learn";
 import { evidenceText, shrink, type RuleScore } from "./skills/score";
 import { RULE_BY_ID } from "./skills/catalog";
 import { wilson, type Interval } from "./stats";
@@ -71,7 +71,7 @@ export function mustHaveBand(a: Application): string | null {
   return n >= 7 ? "7+ requirements" : "Up to 6 requirements";
 }
 
-function coverage(pool: Resolved[], minDocs = 3): Coverage[] {
+function coverage(pool: Resolved[], minDocs = MIN_GROUP): Coverage[] {
   const docs = pool.map((r) => ({ r, terms: new Set(keywords(reqText(r.app))) }));
   const names = surface(pool.map((r) => reqText(r.app)));
   const df = new Map<string, number>();
@@ -88,7 +88,7 @@ function coverage(pool: Resolved[], minDocs = 3): Coverage[] {
       g.ids.push(d.r.app.id);
       if (d.r.outcome === "success") g.s++;
     }
-    if (cov.n < 2 || unc.n < 2) continue;
+    if (cov.n < MIN_GROUP || unc.n < MIN_GROUP) continue;
     const lift = cov.s / cov.n - unc.s / unc.n;
     if (lift <= 0) continue;
     out.push({ term: names.get(t) ?? t, covered: cov, uncovered: unc, lift, tier: comparisonTier(cov.n, unc.n) });
