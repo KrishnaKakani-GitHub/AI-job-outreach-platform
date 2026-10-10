@@ -50,13 +50,14 @@ describe("outcomes", () => {
   });
 });
 
-describe("evidence tiers (5 / 15 / 30)", () => {
-  it("needs 5 outcomes with at least one success and one failure", () => {
+describe("evidence tiers (1 / 15 / 30)", () => {
+  it("starts personal analysis at the first outcome; Pattern needs 15 with both kinds", () => {
     expect(historyTier(0, 0)).toBe("job_post");
-    expect(historyTier(2, 2)).toBe("job_post");
-    expect(historyTier(5, 0)).toBe("job_post");
-    expect(historyTier(0, 9)).toBe("job_post");
-    expect(historyTier(1, 4)).toBe("early");
+    expect(historyTier(1, 0)).toBe("early");
+    expect(historyTier(0, 1)).toBe("early");
+    expect(historyTier(2, 2)).toBe("early");
+    expect(historyTier(15, 0)).toBe("early");
+    expect(historyTier(0, 20)).toBe("early");
     expect(historyTier(3, 11)).toBe("early");
     expect(historyTier(3, 12)).toBe("pattern");
   });
@@ -66,10 +67,12 @@ describe("evidence tiers (5 / 15 / 30)", () => {
     expect(comparisonTier(30, 29)).toBe("pattern");
     expect(comparisonTier(30, 30)).toBe("strong");
   });
-  it("explains what's needed for the next tier", () => {
+  it("is live after one outcome and explains what firms it up", () => {
+    expect(tierProgress([], NOW).tier).toBe("job_post");
+    expect(tierProgress([], NOW).next).toMatch(/first outcome/);
     const p = tierProgress([app({ stage: "rejected" })], NOW);
-    expect(p.tier).toBe("job_post");
-    expect(p.next).toMatch(/4 more outcomes/);
+    expect(p.tier).toBe("early");
+    expect(p.next).toMatch(/14 more outcomes/);
     expect(p.next).toMatch(/gets a response/);
   });
 });
@@ -124,8 +127,9 @@ describe("opener bandit", () => {
   it("is reproducible for a seed", () => {
     expect(chooseOpener(stats, ["role_led", "shared_school"], 42)).toEqual(chooseOpener(stats, ["role_led", "shared_school"], 42));
   });
-  it("gives no guidance until 5 resolved messages with an acceptance", () => {
-    expect(draftGuidance(contacts.slice(0, 2), ["school"], NOW, 1)).toBeNull();
+  it("gives guidance from the first resolved message", () => {
+    expect(draftGuidance([], ["school"], NOW, 1)).toBeNull();
+    expect(draftGuidance(contacts.slice(0, 2), ["school"], NOW, 1)).not.toBeNull();
     const g = draftGuidance(contacts, ["school"], NOW, 1);
     expect(g).not.toBeNull();
     expect(["role_led", "shared_school"]).toContain(g!.opener);
@@ -175,8 +179,11 @@ describe("playbook", () => {
     for (const c of cands) expect(c.evidence).toMatch(/\d+ of \d+/);
     expect(new Set(cands.map((c) => c.key)).size).toBe(cands.length);
   });
-  it("proposes nothing before personal suggestions start", () => {
-    expect(ruleCandidates(applications.slice(0, 2), [], NOW)).toEqual([]);
+  it("proposes nothing without outcomes, and rules as soon as a contrast exists", () => {
+    expect(ruleCandidates([], [], NOW)).toEqual([]);
+    const pending = applications.filter((a) => a.stage === "saved");
+    expect(ruleCandidates(pending, [], NOW)).toEqual([]);
+    for (const c of ruleCandidates(applications.slice(0, 6), contacts, NOW)) expect(c.evidence).toMatch(/\d+ of \d+/);
   });
   it("keeps the user's decisions when data changes, and pauses unsupported rules", () => {
     const first = syncRules([], cands, 1);

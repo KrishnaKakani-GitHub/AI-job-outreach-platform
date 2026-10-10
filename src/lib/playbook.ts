@@ -26,6 +26,7 @@ import {
   resolvedApps,
   tierProgress,
   type Tier,
+  MIN_GROUP,
 } from "./learn";
 
 export const RULE_SCOPES = ["resume", "message", "targeting"] as const;
@@ -122,7 +123,8 @@ function outcomeCandidates(apps: Application[], contacts: Contact[], now: number
   for (const fam of [null, ...families]) {
     const pool = fam ? resolved.filter((r) => familyOf(r.app) === fam) : resolved;
     const s = pool.filter((r) => r.outcome === "success").length;
-    if (pool.length < 5 || s === 0 || s === pool.length) continue;
+    // A contrast needs at least one response and one non-response; nothing more.
+    if (s === 0 || s === pool.length) continue;
     const scopeTxt = fam ? `For ${fam} roles` : "Across your applications";
 
     const v = bestContrast(groupBy(pool, (r) => r.app.resumeVersion));
@@ -144,7 +146,7 @@ function outcomeCandidates(apps: Application[], contacts: Contact[], now: number
       const f = fails.filter((r) => r.app.fit?.gaps.includes(g as never)).length;
       const w = wins.filter((r) => r.app.fit?.gaps.includes(g as never)).length;
       const d = f / fails.length - w / wins.length;
-      if (f >= 2 && d > 0.2 && (!best || d > best.d)) best = { g, f, w, d };
+      if (f >= MIN_GROUP && d > 0.2 && (!best || d > best.d)) best = { g, f, w, d };
     }
     if (best) {
       out.push({
@@ -171,7 +173,7 @@ function outcomeCandidates(apps: Application[], contacts: Contact[], now: number
   }
 
   // Families that keep converting vs not at all (targeting).
-  const fams = groupBy(resolved, (r) => familyOf(r.app)).filter((f) => f.n >= 4);
+  const fams = groupBy(resolved, (r) => familyOf(r.app)).filter((f) => f.n >= MIN_GROUP);
   const top = fams[0];
   const bottom = fams[fams.length - 1];
   if (top && bottom && top !== bottom && top.rate - bottom.rate >= 0.25) {
@@ -189,7 +191,7 @@ function outcomeCandidates(apps: Application[], contacts: Contact[], now: number
   // the same postings carry the same evidence, so they become one rule.
   const groups = new Map<string, { terms: string[]; p: ReturnType<typeof jdPatterns>[number] }>();
   for (const p of jdPatterns(resolved, 8)) {
-    if (p.lift < 0.25 || p.with.n < 3) continue;
+    if (p.lift < 0.25 || p.with.n < MIN_GROUP) continue;
     const sig = `${p.with.s}/${p.with.n}|${p.without.s}/${p.without.n}`;
     const g = groups.get(sig) ?? { terms: [], p };
     g.terms.push(p.term);
@@ -213,7 +215,7 @@ function outcomeCandidates(apps: Application[], contacts: Contact[], now: number
   const all = messageStats(sent, now, () => "all")[0];
   if (all && messageTier(all.s, all.n) !== "job_post") {
     const op = messageStats(sent, now, (c) => c.message!.opener);
-    const bo = op.find((o) => o.n >= 3);
+    const bo = op.find((o) => o.n >= MIN_GROUP);
     const rest = bo ? op.filter((o) => o !== bo).reduce((a, t) => ({ s: a.s + t.s, n: a.n + t.n }), { s: 0, n: 0 }) : null;
     if (bo && rest && rest.n && bo.s / bo.n - rest.s / rest.n >= 0.15) {
       out.push({
@@ -226,7 +228,7 @@ function outcomeCandidates(apps: Application[], contacts: Contact[], now: number
       });
     }
     const types = messageStats(contacts.filter((c) => c.message), now, (c) => c.recipientType);
-    const bt = types.find((t) => t.n >= 3);
+    const bt = types.find((t) => t.n >= MIN_GROUP);
     const trest = bt ? types.filter((t) => t !== bt).reduce((a, t) => ({ s: a.s + t.s, n: a.n + t.n }), { s: 0, n: 0 }) : null;
     if (bt && trest && trest.n && bt.s / bt.n - trest.s / trest.n >= 0.15) {
       out.push({
@@ -241,7 +243,7 @@ function outcomeCandidates(apps: Application[], contacts: Contact[], now: number
     const len = messageStats(sent, now, (c) => (c.message!.chars < 150 ? "short" : "long"));
     const sh = len.find((x) => x.key === "short");
     const lo = len.find((x) => x.key === "long");
-    if (sh && lo && sh.n >= 3 && lo.n >= 3 && sh.s / sh.n - lo.s / lo.n >= 0.15) {
+    if (sh && lo && sh.n >= MIN_GROUP && lo.n >= MIN_GROUP && sh.s / sh.n - lo.s / lo.n >= 0.15) {
       out.push({
         key: "length|short",
         scope: "message",
@@ -313,7 +315,7 @@ export function leadQuoteCandidates(apps: Application[], contacts: Contact[], no
   const out: RuleCandidate[] = [];
   for (const [q, g] of groups) {
     const rest = { s: total.s - g.s, n: total.n - g.n };
-    if (g.s < 2 || !rest.n || g.s / g.n - rest.s / rest.n < 0.2) continue;
+    if (g.s < MIN_GROUP || !rest.n || g.s / g.n - rest.s / rest.n < 0.2) continue;
     const fam = [...g.fams.entries()].sort((a, b) => b[1] - a[1])[0][0];
     out.push({
       key: `lead|${fam}|${q.toLowerCase().slice(0, 80)}`,
