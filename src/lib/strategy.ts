@@ -154,7 +154,7 @@ export interface LanguageFix {
  */
 export function languageFixes(apps: Application[], resume: string, limit = 5): LanguageFix[] {
   const jds = apps.map((a) => a.jobText.toLowerCase()).filter(Boolean);
-  if (jds.length < 2) return [];
+  if (jds.length < 1) return [];
   const resumeLc = resume.toLowerCase();
   const resumeKw = new Set(keywords(resume));
   const fixes: LanguageFix[] = [];
