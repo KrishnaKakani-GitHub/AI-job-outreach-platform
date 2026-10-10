@@ -16,8 +16,8 @@ import type { DraftResult, InterviewResult, TailorResult } from "@/server/servic
 import { traceRules } from "@/lib/skills/catalog";
 import type { ContextManifest, SkillContext } from "@/lib/skills/context";
 import { uid } from "@/lib/text";
-import { buildChatRequest } from "@/lib/chat";
-import { findResumeInHistory, nextResumeVersion } from "@/lib/ingest";
+import { buildChatRequest, guardResumeClaims } from "@/lib/chat";
+import { addResume, findResumeInHistory } from "@/lib/ingest";
 import { addMessage, db, getProfile, saveProfile, updatePayload, type ChatMessage } from "./db";
 import { myVariant, prefs, track } from "./session";
 import { buildCraft, contextFor, freezeCv, guidanceFor, leadBoosts, refreshSkills, resumeFor, signedRules } from "./learning";
@@ -180,21 +180,34 @@ async function sayOnce(ctx: Ctx, text: string): Promise<void> {
   if (!already) await say(ctx, text);
 }
 
-/** Save a resume: version it when it changes (for A/B by resume version) and keep the name. */
-async function saveResume(text: string, source: "paste" | "recovered"): Promise<void> {
+export interface ResumeSaved {
+  what: "resume";
+  version: string;
+  count: number;
+  /** False when the text matched a version already on file (it becomes current again). */
+  added: boolean;
+}
+
+/**
+ * Save a resume into the library: each distinct (tailored) resume keeps its own
+ * version for A/B by resume version; the pasted one becomes current.
+ */
+async function saveResume(text: string, source: "paste" | "recovered"): Promise<ResumeSaved> {
   const prev = await getProfile();
-  const resumeVersion = nextResumeVersion(prev.resumeVersion, prev.resume, text);
-  await saveProfile({ resume: text, resumeVersion, name: prev.name || guessName(text) });
-  console.info(JSON.stringify({ level: "info", event: "resume.saved", source, chars: text.length, resumeVersion, changed: resumeVersion !== prev.resumeVersion }));
+  const lib = addResume(prev, text, Date.now());
+  await saveProfile({ resume: lib.resume, resumeVersion: lib.resumeVersion, resumes: lib.resumes, name: prev.name || guessName(text) });
+  console.info(JSON.stringify({ level: "info", event: "resume.saved", source, chars: text.length, resumeVersion: lib.resumeVersion, added: lib.added, versions: lib.resumes.length }));
+  return { what: "resume", version: lib.resumeVersion, count: lib.resumes.length, added: lib.added };
 }
 
 async function routeDocument(kind: DocKind, text: string, ctx: Ctx): Promise<void> {
   switch (kind) {
     // Every document is saved, then analysed right away with whatever else is on file.
-    case "resume":
-      await saveResume(text, "paste");
-      await addMessage({ id: uid(), chatId: ctx.chatId, role: "assistant", kind: "profile", payload: { what: "resume" } });
+    case "resume": {
+      const saved = await saveResume(text, "paste");
+      await addMessage({ id: uid(), chatId: ctx.chatId, role: "assistant", kind: "profile", payload: saved });
       return streamChat(text, ctx);
+    }
     case "background":
       await saveProfile({ background: text.slice(0, 2000) });
       await addMessage({ id: uid(), chatId: ctx.chatId, role: "assistant", kind: "profile", payload: { what: "background" } });
@@ -498,9 +511,10 @@ async function streamChat(text: string, ctx: Ctx): Promise<void> {
   const { messages: history, context } = buildChatRequest({
     messages: stored,
     text,
-    profile: { resume: profile.resume, background: profile.background },
+    profile: { resume: profile.resume, background: profile.background, resumeVersion: profile.resumeVersion, resumes: profile.resumes },
     app: app ? { role: app.role, company: app.company, fit: app.fit ? { score: app.fit.score, gaps: app.fit.gaps } : null, jobText: app.jobText } : null,
   });
+  const saved = { has: Boolean(profile.resume.trim()), version: profile.resumeVersion, count: Math.max(1, profile.resumes.length) };
   console.info(JSON.stringify({ level: "info", event: "chat.request", turns: history.length, hasResume: Boolean(profile.resume.trim()), contextChars: context.length }));
   const id = uid();
   await addMessage({ id, chatId: ctx.chatId, role: "assistant", kind: "text", text: "" });
@@ -516,8 +530,12 @@ async function streamChat(text: string, ctx: Ctx): Promise<void> {
       const { done, value } = await reader.read();
       if (done) break;
       acc += dec.decode(value, { stream: true });
-      await db.messages.update(id, { text: acc });
+      // Validated layer, applied as text streams in: the model may not claim a
+      // saved resume wasn't received, or ask for it again.
+      await db.messages.update(id, { text: guardResumeClaims(acc, saved).text });
     }
+    const guarded = guardResumeClaims(acc, saved);
+    if (guarded.fixed) console.warn(JSON.stringify({ level: "warn", event: "chat.resume_claim_removed", removed: guarded.removed.length, resumeVersion: saved.version }));
   } catch (e) {
     if ((e as Error).name === "AbortError") {
       const m = await db.messages.get(id);
