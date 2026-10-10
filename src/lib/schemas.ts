@@ -172,12 +172,21 @@ export const OutcomeLog = z.object({
 });
 export type OutcomeLog = z.infer<typeof OutcomeLog>;
 
+export const ResumeVersion = z.object({
+  version: z.string().max(40),
+  text: z.string().max(40000),
+  savedAt: z.number(),
+});
+export type ResumeVersion = z.infer<typeof ResumeVersion>;
+
 export const Profile = z.object({
   id: z.literal("me"),
   name: z.string().max(80).default(""),
   background: z.string().max(2000).default(""),
   resume: z.string().max(40000).default(""),
   resumeVersion: z.string().max(40).default("v1"),
+  /** Every distinct resume the user has saved (tailored versions included). `resume` is the current one. */
+  resumes: z.array(ResumeVersion).max(20).default([]),
   linkedinPremium: z.boolean().default(false),
   signoff: z.string().max(80).default(""),
 });
