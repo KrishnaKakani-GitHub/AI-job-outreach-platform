@@ -142,7 +142,7 @@ export default function WarmIntroApp() {
       >
         <div className="flex items-center gap-2 px-4 pb-2 pt-4">
           <Mark />
-          <span className="text-[16px] font-semibold tracking-tight">Warm Intro</span>
+          <span className="text-[16px] font-semibold tracking-tight">AI Job Tracker</span>
         </div>
         <div className="px-3 py-2">
           <button type="button" onClick={newChat} className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-[14px] hover:border-ink-3">

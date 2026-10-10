@@ -15,7 +15,7 @@ export function PageShell({ current, children }: { current: string; children: Re
       <header className="border-b border-line">
         <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
           <Link href="/" className="flex items-center gap-2 font-semibold">
-            <Mark /> Warm Intro
+            <Mark /> AI Job Tracker
           </Link>
           <nav aria-label="Pages" className="flex flex-wrap gap-x-4 gap-y-1 text-[14px]">
             {LINKS.map((l) => (
