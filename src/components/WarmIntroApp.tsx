@@ -348,7 +348,7 @@ function MessageView({ m, busy, ...p }: { m: ChatMessage; busy: boolean } & Para
       case "interview":
         return <InterviewCard p={m.payload as InterviewPayload} />;
       case "profile":
-        return <ProfileNotice what={(m.payload as { what: "resume" | "background" }).what} onOpenProfile={p.onOpenProfile} />;
+        return <ProfileNotice {...(m.payload as { what: "resume" | "background"; version?: string; count?: number; added?: boolean })} onOpenProfile={p.onOpenProfile} />;
       default:
         return m.text ? <div className="prose-chat text-[15.5px] leading-relaxed"><ReactMarkdown>{m.text}</ReactMarkdown></div> : null;
     }

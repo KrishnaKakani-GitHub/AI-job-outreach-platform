@@ -61,7 +61,12 @@ export function resumeHits(text: string): number {
  */
 export function isStrongResume(text: string, scores?: Record<string, number>): boolean {
   const t = text.trim();
-  return t.length > 300 && CONTACT.test(t) && resumeHits(t) >= 3 && (scores?.job_description ?? 0) < 0.75;
+  if (t.length <= 300 || !CONTACT.test(t) || resumeHits(t) < 3) return false;
+  // A resume tailored to a job is full of that job's words, so the job-post
+  // score can be high. Employment dates ("Jun 2024 - Aug 2024") plus contact
+  // details are a resume's, not a posting's.
+  if (SIGNALS.resume[2].test(t)) return true;
+  return (scores?.job_description ?? 0) < 0.75;
 }
 
 /** Below this, or with the runner-up within AMBIGUOUS_GAP, the app asks instead of acting. */

@@ -124,11 +124,15 @@ export function PasteBubble({ text, p, onReclassify, disabled }: { text: string;
   );
 }
 
-export function ProfileNotice({ what, onOpenProfile }: { what: "resume" | "background"; onOpenProfile: () => void }) {
+export function ProfileNotice({ what, version, count, added, onOpenProfile }: { what: "resume" | "background"; version?: string; count?: number; added?: boolean; onOpenProfile: () => void }) {
+  const text =
+    what === "resume" && version
+      ? `${added === false ? `Already had this resume, so it's ${version} again` : `Saved your resume as ${version}`}${count && count > 1 ? ` (${count} versions on file)` : ""}. I'll use ${version} for every fit check and draft until you paste another.`
+      : `Saved your ${what} to your profile. I'll use it for every fit check and draft from now on.`;
   return (
     <div className="settle flex flex-wrap items-center gap-2 text-[14.5px]">
       <IconCheck width={16} height={16} className="text-accent" />
-      <span>Saved your {what} to your profile. I&apos;ll use it for every fit check and draft from now on.</span>
+      <span>{text}</span>
       <button type="button" className="text-[13px] text-ink-2 underline underline-offset-2 hover:text-ink" onClick={onOpenProfile}>
         Review profile
       </button>
