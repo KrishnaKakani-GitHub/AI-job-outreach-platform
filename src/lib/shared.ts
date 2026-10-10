@@ -27,7 +27,10 @@ const GENERIC = new Set(
   ("The I About Experience Education Skills Projects Present Summary Contact Activity Message Connect Follow " +
     "January February March April May June July August September October November December LinkedIn Remote Hybrid " +
     "Python SQL React TypeScript JavaScript Engineer Engineering Manager Product Data Software Analyst Senior Junior " +
-    "Inc LLC Team Lead Head Director Founder University College School Institute").split(" "),
+    "Inc LLC Team Lead Head Director Founder University College School Institute " +
+    "Thank Thanks Best Regards Sincerely Dear Hello Please Unfortunately Congratulations Welcome Cheers " +
+    "We Our This That These Those You Your After Before While Again Today Hiring Talent Recruiting Acquisition " +
+    "Position Role Application Candidate Candidates Interview").split(" "),
 );
 
 function schools(text: string): Map<string, string> {

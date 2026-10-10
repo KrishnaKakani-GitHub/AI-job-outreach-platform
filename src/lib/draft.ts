@@ -3,6 +3,7 @@
  * Variant B fallback (used when no AI key is configured), and rendering.
  */
 import type { AnatomyPart, Channel, Claim, Draft, DraftSegment, FitReport, Opener, RecipientType, SharedGround, Stage } from "./schemas";
+import { ROLE_UNKNOWN } from "./classify";
 
 export const STAGE_LABELS: Record<Stage, string> = {
   invite_note: "Invite note",
@@ -86,6 +87,11 @@ const LEARN: Record<RecipientType, string> = {
   team_member: "I would love to understand what you enjoy most about the team and what the work looks like week to week.",
 };
 
+/** Subject-line form of the role: "open" alone would read as "open application". */
+function roleTitle(role: string): string {
+  return role === ROLE_UNKNOWN ? "Open role" : role;
+}
+
 /** Variant A: the user's own four-part template with blanks to fill in. */
 export function templateDraft(ctx: DraftContext): Draft {
   const name = ctx.recipientFirstName ?? "[First name]";
@@ -100,7 +106,7 @@ export function templateDraft(ctx: DraftContext): Draft {
     ask: ASKS[ctx.stage][ctx.recipientType],
   };
   return {
-    subject: ctx.channel === "email" ? `${ctx.role} application, quick question` : null,
+    subject: ctx.channel === "email" ? `${roleTitle(ctx.role)} application, quick question` : null,
     greeting: `Hi ${name},`,
     segments: STAGE_PARTS[ctx.stage].map((part) => ({ part, text: segs[part], claims: [] })),
     signoff: ctx.stage === "invite_note" ? `- ${ctx.myName.split(" ")[0] || "[Your name]"}` : `Best,\n${ctx.myName || "[Your name]"}`,
@@ -142,7 +148,7 @@ export function rulesDraft(ctx: DraftContext): Draft {
     ask: { part: "ask", text: ASKS[ctx.stage][ctx.recipientType], claims: [] },
   };
   const draft: Draft = {
-    subject: ctx.channel === "email" ? `${ctx.role} at ${company}${top ? `, ${top.label} connection` : ""}`.slice(0, 140) : null,
+    subject: ctx.channel === "email" ? `${roleTitle(ctx.role)} at ${company}${top ? `, ${top.label} connection` : ""}`.slice(0, 140) : null,
     greeting: `Hi ${ctx.recipientFirstName ?? "there"},`,
     segments: STAGE_PARTS[ctx.stage].map((p) => segs[p]),
     signoff: ctx.stage === "invite_note" ? `- ${ctx.myName.split(" ")[0] || "Me"}` : `Best,\n${ctx.myName || "Me"}`,

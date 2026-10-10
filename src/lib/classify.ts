@@ -6,6 +6,9 @@
 import type { CompanyType, DocKind, JobMeta, RecipientMeta, RecipientType, Seniority } from "./schemas";
 import { isBullet, lines, stripBullet } from "./text";
 
+const GREETING = /^\s*(hi|hello|dear)\s+[A-Z]/m;
+const SIGNOFF = /\b(best|thanks|regards|sincerely|best regards|kind regards),?\s*$/im;
+
 const SIGNALS: Record<Exclude<DocKind, "other">, RegExp[]> = {
   job_description: [
     /\b(responsibilities|qualifications|requirements|what you'?ll do|what you'?ll bring|about the role|who you are)\b/i,
@@ -26,14 +29,25 @@ const SIGNALS: Record<Exclude<DocKind, "other">, RegExp[]> = {
     /\s\|\s|\bat\s+[A-Z]/,
   ],
   background: [/\b(i'?m|i am|my|i have|i've)\b/i],
-  message: [/^\s*(hi|hello|dear)\s+[A-Z]/m, /\b(best|thanks|regards|sincerely),?\s*$/im],
+  message: [
+    GREETING,
+    SIGNOFF,
+    /\bthank you for (your interest|applying|your application|taking the time|considering)\b/i,
+    /\b(other candidates|not (to )?(move|moving) forward|decided to (pursue|proceed|move forward) with|unfortunately|regret to inform|keep your (resume|application) on file)\b/i,
+  ],
 };
 
 export interface Classification {
   kind: DocKind;
   confidence: number;
   scores: Record<string, number>;
+  /** True when the top two labels are too close (or the best is too weak) to act on without asking. */
+  ambiguous: boolean;
 }
+
+/** Below this, or with the runner-up within AMBIGUOUS_GAP, the app asks instead of acting. */
+export const MIN_CONFIDENCE = 0.4;
+export const AMBIGUOUS_GAP = 0.05;
 
 export function classifyDocument(text: string): Classification {
   const t = text.trim();
@@ -50,6 +64,11 @@ export function classifyDocument(text: string): Classification {
   }
   if (len > 1500) scores.background -= 0.6;
   if (/^\s*(hi|hello|dear)\b/i.test(t)) scores.background -= 0.3;
+  // A greeting plus a sign-off is an email or note, not a LinkedIn profile.
+  if (GREETING.test(t) && SIGNOFF.test(t)) {
+    scores.message += 0.3;
+    scores.recipient_profile -= 0.2;
+  }
 
   let kind: DocKind = "other";
   let best = 0.24;
@@ -59,23 +78,38 @@ export function classifyDocument(text: string): Classification {
       kind = k as DocKind;
     }
   }
-  return { kind, confidence: Math.max(0, Math.min(1, best)), scores };
+  const runnerUp = Math.max(...Object.entries(scores).filter(([k]) => k !== kind).map(([, v]) => v));
+  const ambiguous = kind === "other" || best < MIN_CONFIDENCE || best - runnerUp < AMBIGUOUS_GAP;
+  return { kind, confidence: Math.max(0, Math.min(1, best)), scores, ambiguous };
 }
 
 const TITLE_WORDS =
   /\b(engineer|analyst|manager|scientist|associate|designer|developer|specialist|intern|consultant|lead|director|architect|strategist|coordinator|researcher|administrator|representative|product|accelerator)\b/i;
 
+/** Used when no title can be found. Templates read "the open role". */
+export const ROLE_UNKNOWN = "open";
+
+/** A line that reads like prose (not a job title). */
+function isSentence(l: string): boolean {
+  return l.split(/\s+/).length > 8 || /[.!?]$/.test(l) || /^(this|we|you|our|the|as|in|at|join)\b/i.test(l);
+}
+
 export function extractJobMeta(text: string): JobMeta {
   const ls = lines(text);
   let role = "";
-  for (const l of ls.slice(0, 15)) {
+  for (const l of ls.slice(0, 30)) {
     const clean = l.replace(/^(job title|title|role|position)\s*:\s*/i, "");
-    if (clean.length <= 80 && TITLE_WORDS.test(clean) && !/[.!?]$/.test(clean)) {
+    if (clean.length <= 80 && TITLE_WORDS.test(clean) && !isSentence(clean)) {
       role = clean;
       break;
     }
   }
-  if (!role) role = (ls[0] ?? "Untitled role").slice(0, 80);
+  if (!role) {
+    // "the Policy Analyst position", "for the Data Analyst role"
+    const m = text.match(/\bthe[ \t]+((?:[A-Z][\w&/-]*[ \t]+){0,4}[A-Z][\w&/-]*)[ \t]+(?:position|role|opening)\b/);
+    if (m && TITLE_WORDS.test(m[1])) role = m[1];
+  }
+  if (!role) role = ls[0] && !isSentence(ls[0]) && ls[0].length <= 80 ? ls[0] : ROLE_UNKNOWN;
 
   let company: string | null = null;
   const m =
@@ -144,9 +178,12 @@ const RECRUITER = /\b(recruit\w*|talent|sourc(er|ing)|acquisition)\b/i;
 const HR = /\b(hr|human resources|people (ops|operations|partner)|hrbp|people team)\b/i;
 const MANAGER = /\b(manager|head of|director|vp|vice president|founder|co-?founder|cto|ceo|chief|lead)\b/i;
 
+/** Lines starting with these words, or ending in "Team", are never a person's name. */
+const NOT_A_NAME = /^(the|our|thank|thanks|best|kind|warm|regards|sincerely|hi|hello|dear|cheers|team|talent|recruiting|hiring|human|people|about|experience|education|activity)\b|\bteam$/i;
+
 export function extractRecipientMeta(text: string, hasSharedSchool: boolean): RecipientMeta {
   const ls = lines(text).filter((l) => !/^(contact info|message|connect|follow|more)$/i.test(l));
-  const nameLine = ls.find((l) => /^[A-Z][a-zA-Z'-]+(\s+[A-Z][a-zA-Z.'-]+){0,3}$/.test(l)) ?? null;
+  const nameLine = ls.find((l) => /^[A-Z][a-zA-Z'-]+(\s+[A-Z][a-zA-Z.'-]+){0,3}$/.test(l) && !NOT_A_NAME.test(l)) ?? null;
   const firstName = nameLine ? nameLine.split(/\s+/)[0] : null;
   const title =
     ls.find((l) => l !== nameLine && (RECRUITER.test(l) || HR.test(l) || MANAGER.test(l) || /\s(at|@)\s|\s\|\s/.test(l)))?.slice(0, 160) ??
