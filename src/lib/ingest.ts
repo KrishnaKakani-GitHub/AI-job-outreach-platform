@@ -47,3 +47,50 @@ export function findResumeInHistory(messages: PasteLike[]): string | null {
   }
   return null;
 }
+
+export interface ResumeEntry {
+  version: string;
+  text: string;
+  savedAt: number;
+}
+
+export interface ResumeLibrary {
+  resume: string;
+  resumeVersion: string;
+  resumes: ResumeEntry[];
+}
+
+export const MAX_RESUMES = 20;
+
+/** Highest "vN" in use, so a new resume gets the next number. */
+function nextFreeLabel(labels: string[], current: string): string {
+  const nums = labels.map((l) => l.match(/^[vV](\d{1,3})$/)).filter(Boolean).map((m) => Number(m![1]));
+  if (nums.length) return `v${Math.max(...nums) + 1}`;
+  let label = nextResumeVersion(current, "x", "y");
+  while (labels.includes(label)) label = nextResumeVersion(label, "x", "y");
+  return label;
+}
+
+/**
+ * Save a pasted resume into the library. Users keep several tailored resumes:
+ * a new text gets its own version and becomes current; a text that matches a
+ * saved version (ignoring whitespace) switches back to that version instead
+ * of duplicating it. A legacy single resume is kept as the first version.
+ */
+export function addResume(lib: ResumeLibrary, text: string, now: number): ResumeLibrary & { added: boolean } {
+  const resumes: ResumeEntry[] = [...lib.resumes];
+  if (lib.resume.trim() && !resumes.some((r) => norm(r.text) === norm(lib.resume))) {
+    // The current resume isn't in the library yet (saved before it existed, or
+    // edited in the Profile panel). Keep it, under a label no other version uses.
+    const label = lib.resumeVersion || "v1";
+    const free = resumes.some((r) => r.version === label) ? nextFreeLabel(resumes.map((r) => r.version), label) : label;
+    resumes.push({ version: free, text: lib.resume, savedAt: 0 });
+  }
+  const match = resumes.find((r) => norm(r.text) === norm(text));
+  if (match) return { resume: match.text, resumeVersion: match.version, resumes, added: false };
+  const version = resumes.length ? nextFreeLabel(resumes.map((r) => r.version), lib.resumeVersion || "v1") : lib.resumeVersion || "v1";
+  resumes.push({ version, text, savedAt: now });
+  // Keep the newest; never drop the one being made current.
+  const kept = resumes.length > MAX_RESUMES ? resumes.slice(resumes.length - MAX_RESUMES) : resumes;
+  return { resume: text, resumeVersion: version, resumes: kept, added: true };
+}

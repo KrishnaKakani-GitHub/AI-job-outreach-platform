@@ -135,10 +135,12 @@ function firstAt(history: { stage: string; at: number }[], stage: string): numbe
 
 export const db = new WarmIntroDB();
 
-export const EMPTY_PROFILE: Profile = { id: "me", name: "", background: "", resume: "", resumeVersion: "v1", linkedinPremium: false, signoff: "" };
+export const EMPTY_PROFILE: Profile = { id: "me", name: "", background: "", resume: "", resumeVersion: "v1", resumes: [], linkedinPremium: false, signoff: "" };
 
 export async function getProfile(): Promise<Profile> {
-  return (await db.profile.get("me")) ?? EMPTY_PROFILE;
+  // Profiles saved before a field existed get its default (e.g. `resumes`).
+  const stored = await db.profile.get("me");
+  return stored ? { ...EMPTY_PROFILE, ...stored, resumes: stored.resumes ?? [] } : EMPTY_PROFILE;
 }
 
 export async function saveProfile(patch: Partial<Profile>): Promise<Profile> {
