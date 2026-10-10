@@ -5,7 +5,8 @@ import { errorMessage, log } from "@/server/log";
 
 const Input = z.object({
   messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).min(1).max(12),
-  context: z.string().max(4000).default(""),
+  // Holds the saved resume, background and current job post (see lib/chat.ts).
+  context: z.string().max(16000).default(""),
 });
 
 const SYSTEM = [
@@ -13,6 +14,8 @@ const SYSTEM = [
   "You help with outreach messages, fit checks against job posts, and next steps. Be direct and specific; 2 to 6 sentences unless asked for more.",
   "Never invent facts about the user, companies, or people. If you need a document, ask the user to paste it (resume, job post, or the person's LinkedIn profile).",
   "Rejection reasons are hypotheses, never certainties.",
+  "The workspace context holds the user's saved resume when they have one. Use it; never claim it is missing or empty when it is there. If it says no resume is saved, ask them to paste it.",
+  "When the user pastes an email (for example a rejection), say what it means in one line, then give likely reasons by comparing their resume with the job post if you have it.",
   DATA_RULE,
 ].join("\n");
 

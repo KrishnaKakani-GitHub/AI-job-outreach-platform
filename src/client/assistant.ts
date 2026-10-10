@@ -16,6 +16,7 @@ import type { DraftResult, InterviewResult, TailorResult } from "@/server/servic
 import { traceRules } from "@/lib/skills/catalog";
 import type { ContextManifest, SkillContext } from "@/lib/skills/context";
 import { uid } from "@/lib/text";
+import { buildChatRequest } from "@/lib/chat";
 import { addMessage, db, getProfile, saveProfile, updatePayload, type ChatMessage } from "./db";
 import { myVariant, prefs, track } from "./session";
 import { buildCraft, contextFor, freezeCv, guidanceFor, leadBoosts, refreshSkills, resumeFor, signedRules } from "./learning";
@@ -148,7 +149,10 @@ export async function handleInput(text: string, ctx: Ctx, override?: DocKind): P
   const trimmed = text.trim();
   if (!trimmed) return;
   if (override || isPaste(trimmed)) {
-    const kind = override ?? classifyDocument(trimmed).kind;
+    // When the rules can't tell (a tie or a weak score), ask instead of guessing:
+    // a wrong guess can overwrite the saved resume or draft to the wrong person.
+    const c = override ? null : classifyDocument(trimmed);
+    const kind = override ?? (c!.ambiguous ? "other" : c!.kind);
     await addMessage({ id: uid(), chatId: ctx.chatId, role: "user", kind: "paste", text: trimmed, payload: { docKind: kind, chars: trimmed.length } satisfies PastePayload });
     await routeDocument(kind, trimmed, ctx);
     return;
@@ -183,8 +187,11 @@ async function routeDocument(kind: DocKind, text: string, ctx: Ctx): Promise<voi
       return runFit(text, ctx);
     case "recipient_profile":
       return runDraft({ recipientText: text }, ctx);
+    case "message":
+      // Emails (often rejections): answer in chat, with the saved resume in context.
+      return streamChat(text, ctx);
     default:
-      await say(ctx, "I couldn't tell what this is. Use the label on your message to mark it as a resume, job description, or LinkedIn profile, and I'll take it from there.");
+      await say(ctx, "I couldn't tell what this is. Use the label on your message to mark it as a resume, job description, LinkedIn profile, or email, and I'll take it from there.");
   }
 }
 
@@ -459,13 +466,16 @@ export async function loadSimilar(messageId: string, p: SimilarPayload): Promise
 }
 
 async function streamChat(text: string, ctx: Ctx): Promise<void> {
-  const history = (await db.messages.where("chatId").equals(ctx.chatId).sortBy("createdAt"))
-    .filter((m) => m.kind === "text" && m.text)
-    .slice(-10)
-    .map((m) => ({ role: m.role, content: m.text!.slice(0, 4000) }));
-  if (!history.length || history[history.length - 1].role !== "user") history.push({ role: "user", content: text });
+  const stored = await db.messages.where("chatId").equals(ctx.chatId).sortBy("createdAt");
   const app = await chatApplication(ctx.chatId);
-  const context = app ? `Current application: ${app.role}${app.company ? ` at ${app.company}` : ""}. Fit score ${app.fit?.score ?? "n/a"}. Gaps: ${app.fit?.gaps.join(", ") || "none"}.` : "";
+  const profile = await getProfile();
+  const { messages: history, context } = buildChatRequest({
+    messages: stored,
+    text,
+    profile: { resume: profile.resume, background: profile.background },
+    app: app ? { role: app.role, company: app.company, fit: app.fit ? { score: app.fit.score, gaps: app.fit.gaps } : null, jobText: app.jobText } : null,
+  });
+  console.info(JSON.stringify({ level: "info", event: "chat.request", turns: history.length, hasResume: Boolean(profile.resume.trim()), contextChars: context.length }));
   const id = uid();
   await addMessage({ id, chatId: ctx.chatId, role: "assistant", kind: "text", text: "" });
   ctx.setStatus({ label: "Thinking…" });
