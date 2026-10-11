@@ -3,7 +3,7 @@ import Link from "next/link";
 import { H1, H2, PageShell } from "@/components/PageShell";
 import { sampleSizePerArm } from "@/lib/stats";
 
-export const metadata: Metadata = { title: "Case study · Warm Intro", description: "The product loop behind Warm Intro: user, problem, hypothesis, MVP, evidence, iteration." };
+export const metadata: Metadata = { title: "Case study · AI Job Tracker", description: "The product loop behind AI Job Tracker: user, problem, hypothesis, MVP, evidence, iteration." };
 
 /** Next-test candidates scored with RICE. Inputs are planning estimates, not measurements. */
 const RICE = [
@@ -26,7 +26,7 @@ export default function CasePage() {
   return (
     <PageShell current="/case">
       <H1 lede="A two-day build that runs the full product loop: problem, hypothesis, prototype, user behavior, learning, iteration. The prototype is the cheap part; the decisions are the work.">
-        Case study: Warm Intro
+        Case study: AI Job Tracker
       </H1>
 
       <nav aria-label="Sections" className="mb-4 flex flex-wrap gap-x-4 gap-y-1 text-[14px] text-ink-2">
@@ -67,7 +67,7 @@ export default function CasePage() {
           <li><strong>Fit check:</strong> each requirement rated strong, partial or missing, with the resume line that proves it. The score is computed in code, never by the model.</li>
           <li><strong>Grounded draft:</strong> stage-aware (invite note, follow-up, referral ask), recipient-aware, color-coded by part. Every personal detail links to its source, and code rejects any name that appears in none of the documents.</li>
           <li><strong>Tracker:</strong> applications, contacts, sources, follow-ups and an outcome log that separates what employers said from guesses, plus LinkedIn import and backups.</li>
-          <li><strong>Learning loop:</strong> every new job gets a &ldquo;Craft this application&rdquo; card built from the difference between your applications that got a response and the ones that didn&apos;t. Each suggestion shows its reason, the past applications behind it, and an evidence label (job post only → early signal at 5 outcomes → pattern at 15 → strong at 30 per group). Rules you accept go into a personal playbook that shapes every draft, and message openings are chosen by Thompson sampling so the app keeps testing instead of locking in early luck.</li>
+          <li><strong>Learning loop:</strong> every new job gets a &ldquo;Craft this application&rdquo; card built from the difference between your applications that got a response and the ones that didn&apos;t. Each suggestion shows its reason, the past applications behind it, and an evidence label (job post only → early signal from the first outcome → pattern at 15 → strong at 30 per group). Rules you accept go into a personal playbook that shapes every draft, and message openings are chosen by Thompson sampling so the app keeps testing instead of locking in early luck.</li>
           <li><strong>Skills that learn:</strong> ten baseline skills (resume tailoring, bullets, numbers, keyword coverage, outreach, interview prep and more) are used unchanged, then each grows a personal layer. Every checkable piece of advice is scored against the user&apos;s own outcomes per job type and paused where it isn&apos;t working; accepted rules from outcomes, job-post patterns, successful outreach and the user&apos;s notes are added on top. Each output shows exactly what the model saw, and a tailored resume can be compared with what the baseline skills alone produce.</li>
         </ul>
         <p><strong>Deliberately left out:</strong> auto-sending, LinkedIn scraping or login, accounts, server-side storage of documents, Gmail scanning, interview prep, and full resume rewrites (they tend to invent experience).</p>
