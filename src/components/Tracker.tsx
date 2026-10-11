@@ -116,7 +116,7 @@ export function TrackerPanel({ demo, chatId, onClose }: { demo: boolean; chatId:
   async function exportJson() {
     const profile = demo ? null : ((await db.profile.get("me")) ?? null);
     const stamp = new Date().toISOString().slice(0, 10);
-    download(`warm-intro-backup-${stamp}.json`, JSON.stringify(buildBackup(profile, apps, contacts), null, 2), "application/json");
+    download(`ai-job-tracker-backup-${stamp}.json`, JSON.stringify(buildBackup(profile, apps, contacts), null, 2), "application/json");
   }
 
   return (

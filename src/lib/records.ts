@@ -65,7 +65,7 @@ export function parseBackup(text: string): ParseResult<Backup> {
   const r = Backup.safeParse(json);
   if (!r.success) {
     const first = r.error.issues[0];
-    return { ok: false, error: `This doesn't look like a Warm Intro backup (${first ? `${first.path.join(".") || "file"}: ${first.message}` : "unknown format"}).` };
+    return { ok: false, error: `This doesn't look like an AI Job Tracker backup (${first ? `${first.path.join(".") || "file"}: ${first.message}` : "unknown format"}).` };
   }
   const ids = new Set(r.data.applications.map((a) => a.id));
   const dangling = r.data.contacts.filter((c) => c.applicationId && !ids.has(c.applicationId)).length;

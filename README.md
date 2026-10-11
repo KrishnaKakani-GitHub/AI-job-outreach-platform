@@ -1,4 +1,4 @@
-# Warm Intro
+# AI Job Tracker
 
 A chat-first job-search assistant for early-career candidates that ships its own A/B test.
 
@@ -16,7 +16,7 @@ Paste three things: your resume (once), a job post, and the LinkedIn profile of 
   - rules learned from your outcomes, job-type patterns, successful outreach and your own outcome notes are added once you accept them;
   - each skill keeps a version history and exports as a `SKILL.md` you can upload to Claude.
 - **Patterns by job type.** Data analytics, analytics engineering, product and the rest are compared separately: what their posts ask for, which asks mattered once your resume showed them, and which post features (seniority, years required, number of must-haves) went with a response, which advice works there, and a targeting signal (apply more, apply less, not clear yet) from the job type's 95% range against your overall rate. The Craft card matches each new post against your current resume: "This post asks for dbt and your resume doesn't show it; Analytics engineering posts asking for it got a response 6 of 7 times when the resume showed it." Small job types are pulled toward your overall rate until they have data of their own.
-- **An insight ledger and memory log.** Every AI message, every resume that went out (with the insights it followed), every interview and outcome, and every change the skills made because of them is logged in your browser. Each insight is graded on two results, getting a response and getting an interview, so when an interview comes you can see exactly what was on the resume that got it. Every new outcome re-scores every skill; milestones at 10, 50, 100, 200 and 500 applications show what each step of data unlocks.
+- **An insight ledger and memory log.** Every AI message, every resume that went out (with the insights it followed), every interview and outcome, and every change the skills made because of them is logged in your browser. Each insight is graded on two results, getting a response and getting an interview, so when an interview comes you can see exactly what was on the resume that got it. Every new outcome re-scores every skill. Analysis starts with the first outcome; milestones at 1, 15, 50, 200 and 500 outcomes show when results firm up.
 - **A tailored resume for each job.** Built only from lines already in your resume, with every change tied to the rule that caused it. Code blocks new numbers, unsupported job-post terms and unknown names. A side-by-side view compares it with what the baseline skills alone produce.
 - **Interview prep** when an application reaches the interview stage: likely questions from the post, STAR outlines from your own resume lines, and `[fill in]` wherever the resume is silent.
 - **"What the AI saw"** on every draft, tailored resume and prep card: the skills and versions, your learned rules and their evidence, job-type facts and documents, generated from the request that was actually sent.
@@ -28,10 +28,10 @@ Suggestions are never hidden behind a threshold; they carry a label that upgrade
 
 | Data | What the app does | Label |
 |---|---|---|
-| 0–4 outcomes | Suggestions from the job post and your resume only | Based on this job post |
-| 5 outcomes, ≥1 success and ≥1 failure | Personal suggestions start, comparing successes with failures | Early signal |
-| 5 sent messages, ≥1 accepted | Message-style suggestions start | Early signal |
-| 15 outcomes | Comparisons within a role family become meaningful | Pattern |
+| No outcomes yet | Suggestions from the job post and your resume only | Based on this job post |
+| 1+ outcome | Personal suggestions start immediately, with their counts shown ("1 of 1") | Early signal |
+| 1+ resolved message | Message-style suggestions start | Early signal |
+| 15 outcomes, ≥1 success and ≥1 failure | Comparisons within a role family become meaningful | Pattern |
 | 30 outcomes per comparison group | Differences this large are unlikely to be luck | Strong pattern |
 
 A success is any response (a reply, an interview or better). A failure is a rejection without a response, or no response 21 days after applying.
@@ -95,7 +95,7 @@ npm run dev                  # http://localhost:3000
 
 | Command | What it does |
 |---|---|
-| `npm test` | 142 unit tests: statistics, classifier, fit scoring, shared ground, drafting, validators, tracker, CSV and backups, the learning loop and playbook, skill scoring, job-type patterns, tailoring and prep checks, prompt composition, and the AI services (mocked model) |
+| `npm test` | 185 unit tests: statistics, classifier, fit scoring, the resume library and reply guard, shared ground, drafting, validators, tracker, CSV and backups, the learning loop and playbook, skill scoring, job-type patterns, tailoring and prep checks, prompt composition, and the AI services (mocked model) |
 | `npm run test:e2e` | Playwright on a production build: both A/B arms, event logging, tracker, outcome logging, export, the learning card, the playbook, skills and SKILL.md export, the tailored resume and its baseline comparison, and accessibility (axe) |
 | `npm run typecheck && npm run lint` | Static checks |
 
@@ -103,7 +103,7 @@ npm run dev                  # http://localhost:3000
 
 The workflow is in `docs/ci.yml` because the tool used to publish this repo cannot write to `.github/workflows`. To turn it on, move it to `.github/workflows/ci.yml` (GitHub web UI: open the file, rename the path). It runs typecheck, lint, unit tests, build, and the end-to-end suite on every push and pull request.
 
-No lockfile is committed yet, so CI uses `npm install`. Every dependency in `package.json` is pinned to an exact version; commit the `package-lock.json` from your first local install and switch CI to `npm ci`.
+No lockfile is committed yet, so CI uses `npm install`. Every dependency in `package.json` is pinned to an exact version, including `playwright-core`: `@axe-core/playwright` lists it as a loose peer (`>= 1.0.0`), which otherwise pulls a newer Playwright than `@playwright/test` and breaks the build's typecheck. Commit the `package-lock.json` from your first local install and switch CI to `npm ci`.
 
 ## Acknowledgments
 

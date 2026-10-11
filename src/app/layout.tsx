@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Warm Intro",
+  title: "AI Job Tracker",
   description: "Paste a job post and someone's profile. Get a fit check and a grounded outreach note, and learn what to do next.",
 };
 
