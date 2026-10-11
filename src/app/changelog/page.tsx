@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { H1, PageShell } from "@/components/PageShell";
 
-export const metadata: Metadata = { title: "Changelog · Warm Intro", description: "What shipped, and what is next." };
+export const metadata: Metadata = { title: "Changelog · AI Job Tracker", description: "What shipped, and what is next." };
 
 const ENTRIES = [
   {

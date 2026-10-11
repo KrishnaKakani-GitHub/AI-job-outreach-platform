@@ -1,6 +1,6 @@
 # Playbook: ship an A/B-tested AI feature in two days
 
-A reusable recipe, taken from how Warm Intro was built. Fork the relevant files.
+A reusable recipe, taken from how AI Job Tracker was built. Fork the relevant files.
 
 ## 1. Pick the metric before the feature
 - Write the hypothesis in one sentence.
