@@ -86,7 +86,7 @@ test("tracker: add an application, filter, log an outcome, export a backup", asy
   await expect(page.getByText(/Rejected · Experience level/)).toBeVisible();
 
   const [dl] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Export backup" }).click()]);
-  expect(dl.suggestedFilename()).toMatch(/^warm-intro-backup-.*\.json$/);
+  expect(dl.suggestedFilename()).toMatch(/^ai-job-tracker-backup-.*\.json$/);
 });
 
 test("craft card starts from the job post, then gets personal with history", async ({ page }) => {
